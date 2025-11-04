@@ -1,177 +1,210 @@
-# 🚀 ДЕПЛОЙ НА TIMEWEB CLOUD - ЗАВЕРШЕН!
+# Timeweb Cloud Deployment
 
-## ✅ Созданные приложения
+## 🚀 Deployed Applications
 
-### 1. **Backend (FastAPI + Pyrogram)**
-- **URL**: `https://wemdio-parser-0daf.twc1.net`
-- **Название**: `telegram-parser-backend`
-- **Тип**: Backend (Docker)
-- **IP**: 194.58.57.10
-- **Конфигурация**: 1 CPU, 1GB RAM, NVMe диск
-- **Стоимость**: 250₽/мес
+### Backend API
+- **URL**: https://wemdio-parser-0daf.twc1.net
+- **Health Check**: https://wemdio-parser-0daf.twc1.net/health
+- **API Endpoint**: https://wemdio-parser-0daf.twc1.net/api
+- **Type**: Backend (FastAPI + Python)
+- **Framework**: Docker
+- **Status**: ✅ DEPLOYED
 
-### 2. **Frontend (React)**
-- **URL**: `https://wemdio-parser-80e9.twc1.net`
-- **Название**: `telegram-parser-frontend`
-- **Тип**: Frontend (React)
-- **IP**: 46.19.64.95
-- **Стоимость**: 1₽/мес
+### Frontend
+- **URL**: https://wemdio-parser-828c.twc1.net  
+- **Type**: Frontend (React)
+- **Framework**: React
+- **Status**: 🔄 DEPLOYING
 
----
+## ⚙️ Configuration
 
-## 📋 ЧТО СДЕЛАНО АВТОМАТИЧЕСКИ
+### Backend Environment Variables
+The backend is already configured with the necessary environment variables from your local `.env` file:
+- `SUPABASE_URL`
+- `SUPABASE_KEY`
+- `API_ID`
+- `API_HASH`
 
-✅ Создан Git репозиторий: https://github.com/wemdio/Parser.git
-✅ Код запушен в GitHub
-✅ Добавлен VCS провайдер в Timeweb Cloud
-✅ Создано backend приложение с Docker
-✅ Создано frontend приложение с React
-✅ Настроена конфигурация API URL для frontend
-✅ Добавлены переменные окружения для backend:
-   - `SUPABASE_URL`
-   - `SUPABASE_KEY`
-✅ Добавлена переменная окружения для frontend:
-   - `REACT_APP_API_URL`
+### Frontend Environment Variables
+The frontend needs to know where the backend is located. You have two options:
 
----
+#### Option 1: Set environment variable in Timeweb (Recommended)
+1. Go to Timeweb Cloud dashboard
+2. Select your frontend app "Parser Frontend"
+3. Go to Settings → Environment Variables
+4. Add: `REACT_APP_API_URL=https://wemdio-parser-0daf.twc1.net`
+5. Restart the app
 
-## 🎯 КАК ИСПОЛЬЗОВАТЬ
+#### Option 2: Hardcode in config (Quick fix)
+Update `frontend/src/config.js`:
+```javascript
+const API_BASE = 'https://wemdio-parser-0daf.twc1.net';
+export default API_BASE + '/api';
+```
 
-### 1️⃣ Откройте Frontend
-Перейдите на: **https://wemdio-parser-80e9.twc1.net**
+## 📁 Repository Structure Issue
 
-### 2️⃣ Добавьте Telegram аккаунт
-1. Введите `api_id`, `api_hash`, номер телефона
-2. Получите и введите код подтверждения из Telegram
+⚠️ **IMPORTANT**: The current deployment might fail because the frontend code is in the `frontend/` subdirectory, but Timeweb expects it at the repository root for React apps.
 
-### 3️⃣ Выберите чаты для парсинга
-1. Выберите аккаунт
-2. Нажмите "Загрузить чаты"
-3. Выберите нужные чаты
-4. Нажмите "Сохранить"
+### Solutions:
 
-### 4️⃣ Запустите парсинг
-Нажмите "Запустить парсинг" - сообщения за последний час будут сохранены в Supabase!
+#### Solution 1: Use Docker Framework (Recommended)
+Delete the current frontend app and recreate it with `framework: docker`. This will use our custom `frontend/Dockerfile` which handles the subdirectory correctly.
 
----
+#### Solution 2: Restructure Repository
+Move frontend files to root (not recommended as it breaks local development).
 
-## 🔧 ВОЗМОЖНЫЕ ПРОБЛЕМЫ И РЕШЕНИЯ
+#### Solution 3: Wait for Build Logs
+Check if Timeweb can handle the subdirectory automatically. Monitor the build logs.
 
-### ❌ Backend не запускается
-**Решение**: Проверьте логи в панели Timeweb Cloud:
-1. Зайдите в панель управления
-2. Выберите `telegram-parser-backend`
-3. Перейдите в раздел "Логи"
-4. Проверьте ошибки при запуске
+## 🔍 Checking Deployment Status
 
-### ❌ Frontend показывает ошибку подключения
-**Причина**: Backend еще не запустился или не отвечает
-**Решение**: 
-1. Проверьте статус backend в панели Timeweb
-2. Убедитесь, что переменные окружения добавлены
-3. Перезапустите backend, если нужно
-
-### ❌ Ошибка при добавлении аккаунта
-**Проверьте**:
-- Backend запущен и доступен
-- `SUPABASE_URL` и `SUPABASE_KEY` корректны
-- Telegram API credentials правильные
-
-### ❌ Сообщения не сохраняются в Supabase
-**Проверьте**:
-- Таблица `messages` существует (см. `database/schema.sql`)
-- Row Level Security (RLS) ВЫКЛЮЧЕН для таблицы `messages`
-- Backend логи показывают успешное подключение к Supabase
-
----
-
-## 📊 МОНИТОРИНГ
-
-### Проверка статуса Backend
+### Backend
 ```bash
 curl https://wemdio-parser-0daf.twc1.net/health
 ```
 
-Должен вернуть:
+Expected response:
 ```json
 {
   "status": "healthy",
-  "version": "1.0"
+  "timestamp": "...",
+  "version": "1.0.0"
 }
 ```
 
-### Проверка Supabase
-1. Откройте панель Supabase
-2. Перейдите в Table Editor
-3. Откройте таблицу `messages`
-4. Проверьте, что данные сохраняются с `user_id` и `profile_link`
-
----
-
-## 🔄 ОБНОВЛЕНИЕ КОДА
-
-Когда вы вносите изменения в код:
-
-1. **Закоммитьте изменения**:
+### Frontend
 ```bash
-git add .
-git commit -m "Описание изменений"
-git push origin main
+curl https://wemdio-parser-828c.twc1.net
 ```
 
-2. **Обновите приложения в Timeweb**:
-   - Зайдите в панель управления Timeweb
-   - Выберите приложение
-   - Нажмите "Пересобрать" или "Redeploy"
+Should return HTML content.
+
+## 🐛 Troubleshooting
+
+### Frontend Build Failing
+
+**Problem**: "No package.json found"
+
+**Cause**: Timeweb is looking for `package.json` at repository root, but it's in `frontend/` subdirectory.
+
+**Solution**:
+1. Delete the current frontend app from Timeweb dashboard
+2. Create a new app with `framework: docker` instead of `framework: react`
+3. This will use the custom Dockerfile that handles the subdirectory structure
+
+**Alternative**: Create a `package.json` at the repository root that delegates to the frontend:
+```json
+{
+  "name": "parser-root",
+  "scripts": {
+    "build": "cd frontend && npm install && npm run build",
+    "start": "cd frontend && npm start"
+  }
+}
+```
+
+### Frontend Can't Connect to Backend
+
+**Problem**: CORS errors or connection refused
+
+**Solution**:
+1. Check backend CORS settings in `backend/main.py`
+2. Verify `REACT_APP_API_URL` environment variable is set
+3. Check frontend console for actual API URL being used
+
+### Backend Session Issues
+
+**Problem**: Telegram sessions not persisting
+
+**Cause**: Docker container restarts lose session files
+
+**Solution**:
+1. Configure persistent volume in Timeweb for `/app/sessions` directory
+2. Or use database-based session storage (requires code changes)
+
+## 📊 Monitoring
+
+### View Logs
+
+#### Backend Logs
+1. Go to Timeweb dashboard
+2. Select backend app
+3. Click "Logs" tab
+4. Look for startup messages and any errors
+
+#### Frontend Logs  
+1. Go to Timeweb dashboard
+2. Select frontend app
+3. Click "Build Logs" to see build process
+4. Click "Logs" to see nginx access logs
+
+### Common Log Messages
+
+**Backend Success**:
+```
+>>> BACKEND STARTED <<<
+Supabase client initialized successfully
+Starting scheduler...
+Application startup complete.
+```
+
+**Frontend Success**:
+```
+Successfully built
+Serving static files from /build
+```
+
+## 🔄 Redeploying
+
+### Automatic Deployment
+Currently set to manual deployment (`is_auto_deploy: false`).
+
+To enable automatic deployment on git push:
+1. Update app settings in Timeweb
+2. Enable auto-deploy from `main` branch
+
+### Manual Deployment
+1. Push changes to GitHub
+2. Go to Timeweb dashboard
+3. Select the app
+4. Click "Redeploy" button
+5. Or create a new deployment via MCP tools
+
+## 💰 Costs
+
+- **Backend**: 1₽/month (preset 1629 - 1 CPU, 2GB RAM, 30GB disk)
+- **Frontend**: 1₽/month (preset 1451 - 50MB disk)
+- **Total**: 2₽/month (~$0.02 USD/month)
+
+## 🔐 Security Notes
+
+1. **API Keys**: Stored as environment variables in Timeweb (secure)
+2. **Supabase**: Uses service role key (be careful with RLS policies)
+3. **Telegram**: Sessions are stored in container (consider persistent storage)
+4. **HTTPS**: All Timeweb apps use HTTPS by default ✅
+
+## 📝 Next Steps
+
+1. ✅ Backend deployed and working
+2. ⏳ Wait for frontend build to complete
+3. 🔧 If frontend build fails, recreate with Docker framework
+4. 🔗 Test frontend-backend connection
+5. 🎯 Test full Telegram parsing workflow
+6. 📊 Monitor logs for any issues
+7. 💾 Set up persistent storage for sessions (if needed)
+
+## 🆘 Support
+
+If you encounter issues:
+1. Check build logs in Timeweb dashboard
+2. Verify environment variables are set correctly  
+3. Test backend health endpoint
+4. Check CORS configuration
+5. Review this troubleshooting guide
 
 ---
 
-## 💰 СТОИМОСТЬ
-
-- **Backend**: 250₽/мес (1 CPU, 1GB RAM)
-- **Frontend**: 1₽/мес (50MB диск)
-- **ИТОГО**: **251₽/мес** (~$2.50/мес)
-
----
-
-## 📞 ПОДДЕРЖКА
-
-### Timeweb Cloud
-- Панель управления: https://timeweb.cloud/my/apps
-- Документация: https://timeweb.cloud/help
-
-### Supabase
-- Панель управления: https://supabase.com/dashboard/project/liavhyhyzqadilfmicba
-- Документация: https://supabase.com/docs
-
----
-
-## 🎯 СЛЕДУЮЩИЕ ШАГИ
-
-1. ✅ Откройте frontend: https://wemdio-parser-80e9.twc1.net
-2. ✅ Добавьте Telegram аккаунт
-3. ✅ Выберите чаты
-4. ✅ Запустите парсинг
-5. ✅ Проверьте данные в Supabase
-
----
-
-## 🔐 БЕЗОПАСНОСТЬ
-
-⚠️ **ВАЖНО**: 
-- Не публикуйте `.env` файл в Git
-- Храните `SUPABASE_KEY` в секрете
-- Используйте Anon Key, а не Service Role Key для frontend
-- Telegram session файлы не попадают в Git (`.gitignore`)
-
----
-
-## ✨ ГОТОВО!
-
-Ваше приложение задеплоено и готово к использованию! 🎉
-
-**Frontend**: https://wemdio-parser-80e9.twc1.net
-**Backend API**: https://wemdio-parser-0daf.twc1.net
-
-Удачного парсинга! 🚀
-
+**Deployment Date**: 2025-11-04  
+**Repository**: https://github.com/wemdio/Parser.git  
+**Latest Commit**: 224d59839b203c71486d4a85771225ff6988790a
