@@ -2,21 +2,41 @@
 
 ## What Was The Problem?
 
-Yes, I could see the deployment logs you sent. The issue was clear:
-
+### Issue #1: Old Code (RESOLVED)
+The first deployment logs showed:
 ```
 11:23:53 | DEBUG | #11 0.083 No package.json found - installing React dependencies fallback
 ```
+The Timeweb Cloud deployment was using **old code** (commit `7f695f0`) that didn't have the root `package.json` file.
 
-The Timeweb Cloud deployment was using **old code** (commit `7f695f0`) that didn't have the root `package.json` file. The root `package.json` was added in a later commit (`9addb7a`).
+### Issue #2: .dockerignore Excluding frontend/ (JUST FIXED)
+After redeployment, new logs showed:
+```
+12:31:45 | DEBUG | #12 0.235 sh: 1: cd: can't cd to frontend
+```
+
+**Root cause**: The `.dockerignore` file at the root was excluding the entire `frontend/` directory:
+```dockerignore
+# Frontend (for backend builds)
+frontend/
+```
+
+This meant the Docker build context didn't include the frontend files, so the build script `cd frontend && npm install && npm run build` failed.
 
 ## What I Did To Fix It
 
+### For Issue #1 (Old Code):
 1. ✅ **Verified** that the root `package.json` exists locally
 2. ✅ **Confirmed** it was already committed and pushed to GitHub
 3. ✅ **Identified** that Timeweb was building an old commit
 4. ✅ **Pushed** an empty commit to trigger a new deployment
-5. ✅ **Updated** deployment documentation
+
+### For Issue #2 (.dockerignore):
+1. ✅ **Identified** the `frontend/` exclusion in `.dockerignore`
+2. ✅ **Removed** the `frontend/` line from root `.dockerignore`
+3. ✅ **Created** `backend.dockerignore` for backend-specific builds
+4. ✅ **Committed and pushed** the fix (commit `fdea3e9`)
+5. ✅ **Triggered** automatic redeployment
 
 ## What Happens Next?
 
