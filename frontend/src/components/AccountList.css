@@ -1,0 +1,76 @@
+.accounts-list {
+  margin-top: 15px;
+}
+
+.account-item {
+  padding: 15px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  margin-bottom: 10px;
+  background-color: #f9f9f9;
+}
+
+.account-info {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.account-name {
+  font-weight: 500;
+  font-size: 16px;
+  color: #333;
+}
+
+.account-phone {
+  color: #666;
+  font-size: 14px;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 4px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  width: fit-content;
+  margin-top: 5px;
+}
+
+.status-connected {
+  background-color: #d4edda;
+  color: #155724;
+}
+
+.status-disconnected {
+  background-color: #f8d7da;
+  color: #721c24;
+}
+
+.account-actions {
+  margin-top: 10px;
+  display: flex;
+  gap: 10px;
+}
+
+.message {
+  padding: 10px;
+  border-radius: 4px;
+  margin-bottom: 15px;
+}
+
+.message-success {
+  background-color: #d4edda;
+  color: #155724;
+}
+
+.message-error {
+  background-color: #f8d7da;
+  color: #721c24;
+}
+
+.message-info {
+  background-color: #d1ecf1;
+  color: #0c5460;
+}
+

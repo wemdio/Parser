@@ -1,0 +1,68 @@
+.parser-controls {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.parser-controls h2 {
+  color: white;
+}
+
+.parser-info {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 15px;
+  border-radius: 4px;
+  margin-bottom: 20px;
+}
+
+.parser-info ul {
+  margin-top: 10px;
+  padding-left: 20px;
+}
+
+.parser-info li {
+  margin-bottom: 8px;
+}
+
+.running-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 15px;
+  padding: 10px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 4px;
+}
+
+.status-indicator {
+  width: 12px;
+  height: 12px;
+  background-color: #4caf50;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.message {
+  background: rgba(255, 255, 255, 0.9);
+  color: #333;
+  padding: 10px;
+  border-radius: 4px;
+  margin-bottom: 15px;
+}
+
+.message-success {
+  border-left: 4px solid #4caf50;
+}
+
+.message-error {
+  border-left: 4px solid #f44336;
+}
+

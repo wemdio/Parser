@@ -1,0 +1,44 @@
+.chats-container {
+  margin: 20px 0;
+}
+
+.chats-list {
+  max-height: 400px;
+  overflow-y: auto;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 10px;
+}
+
+.chat-item {
+  padding: 8px;
+  border-bottom: 1px solid #eee;
+}
+
+.chat-item:last-child {
+  border-bottom: none;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+}
+
+.chat-name {
+  font-weight: 500;
+  flex: 1;
+}
+
+.chat-username {
+  color: #666;
+  font-size: 0.9em;
+}
+
+.loading {
+  text-align: center;
+  padding: 20px;
+  color: #666;
+}
+
