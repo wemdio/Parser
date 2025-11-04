@@ -3,26 +3,31 @@ FROM node:18-alpine as build
 
 WORKDIR /app
 
-# Копирование package файлов
+# Копирование package файлов и установка зависимостей
 COPY package*.json ./
-
-# Установка зависимостей
-RUN npm install
+RUN npm ci --only=production --ignore-scripts
 
 # Копирование исходного кода
-COPY . .
+COPY public/ ./public/
+COPY src/ ./src/
 
 # Сборка приложения
 RUN npm run build
 
-# Production stage
+# Production stage - используем nginx для раздачи статики
 FROM nginx:alpine
+
+# Удаляем дефолтную конфигурацию nginx
+RUN rm /etc/nginx/conf.d/default.conf
 
 # Копирование собранного приложения
 COPY --from=build /app/build /usr/share/nginx/html
 
-# Копирование конфигурации nginx
+# Копирование нашей конфигурации nginx
 COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+# Проверяем что файлы скопированы
+RUN ls -la /usr/share/nginx/html
 
 EXPOSE 80
 

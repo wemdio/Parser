@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Sessions
+sessions/*.session
+sessions/*.session-journal
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Docs
+*.md
+!README.md
+
+# Frontend (for backend builds)
+frontend/
+
+# Environment
+.env.local
+.env.test
+
