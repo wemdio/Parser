@@ -4,7 +4,7 @@
   "description": "Telegram Parser - Frontend and Backend",
   "private": true,
   "scripts": {
-    "build": "cd frontend && npm install && npm run build && cd .. && mv frontend/build build",
+    "build": "cd frontend && npm install && npm run build && cd .. && mv frontend/build build && rm -rf frontend/node_modules frontend/src frontend/public",
     "start": "cd frontend && npm start",
     "test": "cd frontend && npm test"
   },
