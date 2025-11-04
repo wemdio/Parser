@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
 import './ChatSelector.css';
-
-const API_BASE = 'http://localhost:8000/api';
+import API_BASE from '../config';
 
 function ChatSelector({ accounts }) {
   const [selectedAccount, setSelectedAccount] = useState(null);

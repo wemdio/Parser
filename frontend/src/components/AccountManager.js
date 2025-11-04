@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import './AccountManager.css';
-
-const API_BASE = 'http://localhost:8000/api';
+import API_BASE from '../config';
 
 function AccountManager({ onAccountAdded, onAccountVerified }) {
   const [showAddForm, setShowAddForm] = useState(false);

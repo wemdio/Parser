@@ -5,8 +5,7 @@ import AccountManager from './components/AccountManager';
 import AccountList from './components/AccountList';
 import ChatSelector from './components/ChatSelector';
 import ParserControls from './components/ParserControls';
-
-const API_BASE = 'http://localhost:8000/api';
+import API_BASE from './config';
 
 function App() {
   const [accounts, setAccounts] = useState([]);
