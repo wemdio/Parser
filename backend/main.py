@@ -69,17 +69,11 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# Настройка CORS
+# Настройка CORS - разрешаем все origin для упрощения деплоя
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-        "https://wemdio-parser-828c.twc1.net",  # Frontend production
-        "https://wemdio-parser-ddaf.twc1.net",  # Alternative frontend URL
-        "https://wemdio-parser-0daf.twc1.net",  # Backend URL (for same-origin)
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],  # Разрешаем все домены
+    allow_credentials=False,  # Отключаем credentials для работы с wildcard
     allow_methods=["*"],
     allow_headers=["*"],
 )
