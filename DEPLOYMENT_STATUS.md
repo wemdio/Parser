@@ -33,13 +33,17 @@
 
 ---
 
-## 🔄 Frontend - DEPLOYING
+## 🔄 Frontend - REDEPLOYMENT TRIGGERED
 
 ### URLs
 - **Frontend**: https://wemdio-parser-828c.twc1.net
 
 ### Current Status
-The frontend app has been created and is building. I've made the following fixes:
+⏳ **Redeployment in progress** - The frontend is being rebuilt with the latest code.
+
+#### Issue Identified:
+The initial deployment was using commit `7f695f0` (before the root `package.json` was added).
+The root `package.json` was added in commit `9addb7a`, so the deployment failed.
 
 #### What Was Fixed:
 1. ✅ Added root-level `package.json` that delegates to `frontend/` subdirectory
@@ -47,10 +51,12 @@ The frontend app has been created and is building. I've made the following fixes
 3. ✅ Updated nginx configuration for proper SPA routing
 4. ✅ Added `.dockerignore` files to optimize builds
 5. ✅ Pushed all changes to GitHub
+6. ✅ **Pushed empty commit to trigger redeployment**
 
 #### Latest Commit:
-- **SHA**: `9addb7ad8de33c8865148a195054a3d5ae17cabc`
-- **Message**: "Add root package.json for Timeweb frontend deployment and update deployment docs"
+- **SHA**: `96b378c` (latest)
+- **Message**: "Trigger frontend redeployment"
+- **Note**: This includes all fixes from commit `9addb7a`
 
 ### Cost
 **1₽/month** (Preset 1451: 50MB disk)
@@ -59,15 +65,17 @@ The frontend app has been created and is building. I've made the following fixes
 
 ## 📋 Next Steps for You
 
-### Step 1: Trigger Frontend Redeploy
-Since the frontend app was created with an older commit, you need to redeploy it with the latest code:
+### Step 1: Wait for Frontend Deployment to Complete ⏳
+The redeployment has been triggered automatically. Now you need to:
 
 1. Go to **Timeweb Cloud Dashboard**: https://timeweb.cloud/my/cloud-apps
 2. Find the app named **"Parser Frontend"**
-3. Click on it
-4. Click **"Redeploy"** or **"Deploy"** button
-5. Select commit `9addb7ad8de33c8865148a195054a3d5ae17cabc` (or latest from main branch)
-6. Wait for build to complete (check "Build Logs" tab)
+3. Click on it to see deployment status
+4. Check the **"Build Logs"** tab to monitor progress
+5. Wait for the deployment to complete (usually 5-10 minutes)
+6. Look for a successful build message
+
+**Expected in logs**: You should see `npm run build` succeed and files copied to `/usr/share/nginx/html`
 
 ### Step 2: Configure Frontend Environment (Optional)
 If the frontend can't connect to the backend, add this environment variable:
