@@ -1,0 +1,46 @@
+# Backend-specific .dockerignore
+# Use this with: docker build -f Dockerfile --dockerignore-file backend.dockerignore .
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+*.egg-info/
+dist/
+build/
+
+# Sessions (keep directory structure but not session files)
+sessions/*.session
+sessions/*.session-journal
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Git
+.git/
+.gitignore
+
+# Docs
+*.md
+!README.md
+
+# Frontend (not needed for backend)
+frontend/
+
+# Environment
+.env.local
+.env.test
+
+# Node modules
+node_modules/
+package.json
+package-lock.json
+

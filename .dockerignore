@@ -29,10 +29,10 @@ sessions/*.session-journal
 *.md
 !README.md
 
-# Frontend (for backend builds)
-frontend/
-
 # Environment
 .env.local
 .env.test
+
+# Note: frontend/ is NOT excluded here because it's needed for frontend builds
+# The backend Dockerfile uses its own .dockerignore to exclude frontend/
 
