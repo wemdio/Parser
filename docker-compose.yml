@@ -8,6 +8,7 @@ services:
     environment:
       - SUPABASE_URL=${SUPABASE_URL}
       - SUPABASE_KEY=${SUPABASE_KEY}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-}
     volumes:
       - ./sessions:/app/sessions
       - ./accounts.json:/app/accounts.json
@@ -22,6 +23,6 @@ services:
     depends_on:
       - backend
     environment:
-      - REACT_APP_API_URL=http://localhost:8000
+      - REACT_APP_API_URL=${REACT_APP_API_URL:-http://localhost:8000}
     restart: unless-stopped
 

@@ -70,9 +70,21 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 # Настройка CORS
+# Получаем разрешенные источники из переменной окружения или используем значения по умолчанию
+allowed_origins = os.getenv("ALLOWED_ORIGINS", "").split(",") if os.getenv("ALLOWED_ORIGINS") else []
+default_origins = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+    "https://wemdio.parser.odaf.twcl.net",
+    "https://acmdio-parser-odaf.twcl.net",
+]
+all_origins = list(set(default_origins + allowed_origins))
+
+print(f">>> CORS allowed origins: {all_origins}", flush=True)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=all_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
