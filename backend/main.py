@@ -72,7 +72,13 @@ app = FastAPI(lifespan=lifespan)
 # Настройка CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:3000", "http://127.0.0.1:3000"],
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://wemdio-parser-828c.twc1.net",  # Frontend production
+        "https://wemdio-parser-ddaf.twc1.net",  # Alternative frontend URL
+        "https://wemdio-parser-0daf.twc1.net",  # Backend URL (for same-origin)
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
