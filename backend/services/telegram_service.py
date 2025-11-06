@@ -285,13 +285,14 @@ class TelegramService:
                 try:
                     chat = await client.get_chat(chat_id)
                     chat_title = chat.title if hasattr(chat, 'title') else f"Chat {chat_id}"
+                    chat_username = chat.username if hasattr(chat, 'username') else None
                     
                     # Получаем сообщения с ограничением по времени
                     messages_in_chat = 0
                     skipped_old = 0
                     total_checked = 0
                     
-                    print(f"\n>>> Fetching history for chat '{chat_title}'...", flush=True)
+                    print(f"\n>>> Fetching history for chat '{chat_title}' (username: {chat_username})...", flush=True)
                     
                     async for message in client.get_chat_history(chat_id, limit=1000):
                         total_checked += 1
@@ -398,14 +399,20 @@ class TelegramService:
                             if messages_in_chat < 5:
                                 print(f"    ✓ SAVING message #{messages_in_chat + 1}: {msg_date.strftime('%Y-%m-%d %H:%M:%S')} (WITHIN time limit)", flush=True)
                             
-                            # Создаем ссылку на профиль
+                            # Создаем ссылку на профиль или сообщение
                             profile_link = None
                             if user_info.get("username"):
-                                # Если есть username - используем прямую ссылку
+                                # Если есть username - используем прямую ссылку на профиль
                                 profile_link = f"https://t.me/{user_info.get('username')}"
-                            elif user_info.get("user_id"):
-                                # Если нет username - ссылка по ID (откроет профиль в приложении)
-                                profile_link = f"tg://user?id={user_info.get('user_id')}"
+                            else:
+                                # Если нет username - создаём deep link на само сообщение
+                                if chat_username:
+                                    # Публичный канал/группа - ссылка на сообщение
+                                    message_link = f"https://t.me/{chat_username}/{message.id}"
+                                    profile_link = f"Профиль скрыт. Сообщение в чате \"{chat_title}\": {message_link}"
+                                else:
+                                    # Приватный чат - только описание
+                                    profile_link = f"Профиль скрыт. Сообщение в приватном чате \"{chat_title}\" (ID сообщения: {message.id})"
                             
                             # Подготавливаем данные для сохранения
                             message_data = {
