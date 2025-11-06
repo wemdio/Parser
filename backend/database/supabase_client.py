@@ -6,12 +6,33 @@ load_dotenv()
 
 class SupabaseClient:
     def __init__(self):
+        print("\n" + "="*70, flush=True)
+        print("🔧 INITIALIZING SUPABASE CLIENT", flush=True)
+        print("="*70, flush=True)
+        
+        # Проверяем ВСЕ переменные окружения, связанные с Supabase
+        print(f"📋 Checking environment variables:", flush=True)
         supabase_url = os.getenv("SUPABASE_URL")
         supabase_key = os.getenv("SUPABASE_KEY")
         
+        print(f"   SUPABASE_URL exists: {supabase_url is not None}", flush=True)
+        print(f"   SUPABASE_KEY exists: {supabase_key is not None}", flush=True)
+        
+        if supabase_url:
+            print(f"   SUPABASE_URL value: {supabase_url[:30]}...", flush=True)
+        else:
+            print(f"   ❌ SUPABASE_URL is empty/None!", flush=True)
+            
+        if supabase_key:
+            print(f"   SUPABASE_KEY length: {len(supabase_key)} characters", flush=True)
+        else:
+            print(f"   ❌ SUPABASE_KEY is empty/None!", flush=True)
+        
         if not supabase_url or not supabase_key:
-            print("ERROR: SUPABASE_URL and SUPABASE_KEY not set!")
-            print("Please check .env file with your Supabase credentials.")
+            print("\n❌ ERROR: SUPABASE_URL and/or SUPABASE_KEY not set!", flush=True)
+            print("   Please set them in Timeweb Cloud environment variables", flush=True)
+            print("   Then RESTART the backend application", flush=True)
+            print("="*70 + "\n", flush=True)
             self.client = None
             return
         
@@ -65,8 +86,13 @@ class SupabaseClient:
     def insert_messages_batch(self, messages: list) -> bool:
         """Вставляет пакет сообщений"""
         if not self.client:
-            print("ERROR: Supabase client not initialized. Messages not saved!", flush=True)
-            print("Check Supabase credentials in .env file", flush=True)
+            print("\n" + "="*70, flush=True)
+            print("❌ ERROR: Supabase client not initialized. Messages not saved!", flush=True)
+            print("   Possible reasons:", flush=True)
+            print("   1. SUPABASE_URL or SUPABASE_KEY not set in environment", flush=True)
+            print("   2. Backend not restarted after adding variables", flush=True)
+            print("   3. Invalid Supabase credentials", flush=True)
+            print("="*70 + "\n", flush=True)
             return False
         
         if not messages:
