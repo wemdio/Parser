@@ -66,3 +66,28 @@
   border-left: 4px solid #f44336;
 }
 
+.message-info {
+  border-left: 4px solid #2196f3;
+}
+
+.parser-buttons {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.parser-buttons .btn {
+  flex: 1;
+  min-width: 200px;
+}
+
+.btn-danger {
+  background: linear-gradient(135deg, #f44336 0%, #d32f2f 100%);
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: linear-gradient(135deg, #d32f2f 0%, #c62828 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(211, 47, 47, 0.3);
+}
+
