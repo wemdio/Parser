@@ -91,3 +91,80 @@
   box-shadow: 0 4px 8px rgba(211, 47, 47, 0.3);
 }
 
+/* Автоматический парсинг */
+.auto-parsing-section,
+.manual-parsing-section {
+  margin-bottom: 25px;
+}
+
+.auto-parsing-section h3,
+.manual-parsing-section h3 {
+  color: white;
+  margin-bottom: 15px;
+  font-size: 1.2em;
+}
+
+.auto-parsing-status {
+  background: rgba(255, 255, 255, 0.15);
+  padding: 15px;
+  border-radius: 8px;
+  margin-bottom: 15px;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: wrap;
+}
+
+.status-badge {
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-weight: 600;
+  font-size: 0.95em;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.status-active {
+  background: rgba(76, 175, 80, 0.3);
+  border: 2px solid #4caf50;
+  color: #fff;
+}
+
+.status-paused {
+  background: rgba(255, 152, 0, 0.3);
+  border: 2px solid #ff9800;
+  color: #fff;
+}
+
+.next-run-info {
+  flex: 1;
+  font-size: 0.95em;
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.next-run-info strong {
+  color: #fff;
+  font-weight: 600;
+}
+
+.parser-controls hr {
+  border: none;
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+  margin: 25px 0;
+}
+
+.btn-warning {
+  background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+}
+
+.btn-warning:hover:not(:disabled) {
+  background: linear-gradient(135deg, #f57c00 0%, #e65100 100%);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(245, 124, 0, 0.3);
+}
+
+.message-warning {
+  border-left: 4px solid #ff9800;
+}
+

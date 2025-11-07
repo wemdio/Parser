@@ -47,6 +47,10 @@ async def lifespan(app: FastAPI):
     # Инициализация сервиса парсинга
     parser_service = ParserService(supabase_client)
     
+    # Сохраняем scheduler и статус в app.state для доступа из роутеров
+    app.state.scheduler = scheduler
+    app.state.auto_parsing_enabled = True  # По умолчанию включен
+    
     # Запуск планировщика при старте
     scheduler.start()
     
@@ -59,7 +63,7 @@ async def lifespan(app: FastAPI):
         replace_existing=True
     )
     
-    print("Scheduler started - will parse messages every hour\n", flush=True)
+    print("✅ Scheduler started - auto-parsing enabled (every hour)\n", flush=True)
     
     yield
     
