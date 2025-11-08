@@ -1,5 +1,5 @@
 from pyrogram import Client
-from pyrogram.errors import PhoneCodeInvalid, PhoneNumberInvalid, SessionPasswordNeeded, PhoneCodeExpired
+from pyrogram.errors import PhoneCodeInvalid, PhoneNumberInvalid, SessionPasswordNeeded, PhoneCodeExpired, FloodWait, PeerIdInvalid
 import asyncio
 import os
 from typing import Optional, Dict, List
@@ -271,6 +271,16 @@ class TelegramService:
             if not client.is_connected:
                 raise Exception("Not connected")
             
+            # 🔥 ЗАГРУЖАЕМ ВСЕ ЧАТЫ В КЭШ - исправляет "Peer id invalid"
+            print(f"\n>>> 🔄 Loading chats into Pyrogram cache...", flush=True)
+            dialog_count = 0
+            try:
+                async for dialog in client.get_dialogs(limit=500):
+                    dialog_count += 1
+                print(f">>> ✅ Loaded {dialog_count} chats into cache", flush=True)
+            except Exception as e:
+                print(f">>> ⚠️ Warning: Could not load all dialogs: {e}", flush=True)
+            
             messages_data = []
             # Используем UTC время для сравнения
             from datetime import timezone
@@ -358,6 +368,11 @@ class TelegramService:
                                     user_info["bio"] = user_full.about
                                 else:
                                     user_info["bio"] = None
+                            except FloodWait as e:
+                                # Rate limit при получении био - просто пропускаем
+                                if total_checked <= 3:
+                                    print(f"    Rate limit getting bio, skipping (wait {e.value}s)", flush=True)
+                                user_info["bio"] = None
                             except Exception as e:
                                 if total_checked <= 3:
                                     print(f"    Could not get bio: {e}", flush=True)
@@ -378,6 +393,11 @@ class TelegramService:
                                     user_info["bio"] = chat_full.description
                                 else:
                                     user_info["bio"] = None
+                            except FloodWait as e:
+                                # Rate limit при получении описания - просто пропускаем
+                                if total_checked <= 3:
+                                    print(f"    Rate limit getting description, skipping (wait {e.value}s)", flush=True)
+                                user_info["bio"] = None
                             except Exception as e:
                                 if total_checked <= 3:
                                     print(f"    Could not get channel description: {e}", flush=True)
@@ -442,8 +462,18 @@ class TelegramService:
                     print(f"    - Saved: {messages_in_chat} messages (within last hour)", flush=True)
                     print(f"    - Skipped: {skipped_old} messages (too old)", flush=True)
                 
+                except FloodWait as e:
+                    # 🔥 АВТОМАТИЧЕСКОЕ ОЖИДАНИЕ при rate limit
+                    print(f"⏳ Rate limit for chat {chat_id}: waiting {e.value} seconds...", flush=True)
+                    await asyncio.sleep(e.value)
+                    print(f"✅ Wait complete, continuing to next chat", flush=True)
+                    continue
+                except PeerIdInvalid:
+                    # ⚠️ Чат недоступен (выгнали, удален, или нет прав)
+                    print(f"⚠️ Chat {chat_id} is not accessible (kicked, deleted, or no access). Skipping.", flush=True)
+                    continue
                 except Exception as e:
-                    print(f"Error parsing chat {chat_id}: {e}")
+                    print(f"❌ Error parsing chat {chat_id}: {e}", flush=True)
                     continue
             
             await client.disconnect()
