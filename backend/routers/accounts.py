@@ -1,8 +1,9 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from backend.services.telegram_service import TelegramService
 from backend.database.account_storage import AccountStorage
 import os
+import shutil
 
 router = APIRouter()
 telegram_service = TelegramService()
@@ -297,5 +298,160 @@ async def check_account_status(account_id: int):
     except HTTPException:
         raise
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/upload-session")
+async def upload_session(
+    session_file: UploadFile = File(...),
+    api_id: str = Form(...),
+    api_hash: str = Form(...),
+    phone_number: str = Form(...),
+    name: str = Form(None)
+):
+    """
+    Загружает готовый файл сессии и добавляет аккаунт.
+    Используется когда нельзя получить код подтверждения на сервере.
+    """
+    import sys
+    print(f"\n{'#'*60}", file=sys.stderr, flush=True)
+    print(f"### UPLOAD SESSION REQUEST ###", file=sys.stderr, flush=True)
+    print(f"### Phone: {phone_number}", file=sys.stderr, flush=True)
+    print(f"### File: {session_file.filename}", file=sys.stderr, flush=True)
+    print(f"{'#'*60}\n", file=sys.stderr, flush=True)
+    
+    try:
+        # Валидация
+        api_id_str = (api_id or "").strip()
+        api_hash_str = (api_hash or "").strip()
+        phone_str = (phone_number or "").strip()
+        
+        if not api_id_str:
+            raise HTTPException(status_code=400, detail="API ID is required")
+        if not api_hash_str:
+            raise HTTPException(status_code=400, detail="API Hash is required")
+        if not phone_str:
+            raise HTTPException(status_code=400, detail="Phone number is required")
+        
+        # Проверяем API ID
+        try:
+            api_id_int = int(api_id_str)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="API ID must be a number")
+        
+        # Нормализуем номер телефона
+        phone = phone_str.replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+        if not phone.startswith("+"):
+            if phone.startswith("8") and len(phone) == 11:
+                phone = "+7" + phone[1:]
+            else:
+                raise HTTPException(
+                    status_code=400, 
+                    detail="Phone number must start with '+' (e.g., +79991234567)"
+                )
+        
+        # Создаем папку sessions если нет
+        os.makedirs("sessions", exist_ok=True)
+        
+        # Формируем имя файла сессии
+        phone_clean = phone.replace("+", "")
+        session_filename = f"{phone_clean}.session"
+        session_path = os.path.join("sessions", session_filename)
+        
+        # Удаляем старую сессию если есть
+        for ext in ["", ".session"]:
+            old_path = f"sessions/{phone_clean}{ext}"
+            if os.path.exists(old_path):
+                try:
+                    os.remove(old_path)
+                    print(f"Removed old session: {old_path}", file=sys.stderr, flush=True)
+                except Exception as e:
+                    print(f"Could not remove {old_path}: {e}", file=sys.stderr, flush=True)
+        
+        # Сохраняем загруженный файл
+        print(f"Saving session to: {session_path}", file=sys.stderr, flush=True)
+        with open(session_path, "wb") as buffer:
+            content = await session_file.read()
+            buffer.write(content)
+        
+        print(f"Session file saved, size: {len(content)} bytes", file=sys.stderr, flush=True)
+        
+        # Проверяем валидность сессии
+        from pyrogram import Client
+        
+        test_client = Client(
+            f"sessions/{phone_clean}",
+            api_id=api_id_int,
+            api_hash=api_hash_str
+        )
+        
+        try:
+            print("Testing session validity...", file=sys.stderr, flush=True)
+            await test_client.start()
+            me = await test_client.get_me()
+            await test_client.stop()
+            
+            print(f"Session valid! User: {me.first_name} (@{me.username})", file=sys.stderr, flush=True)
+            
+            # Проверяем существующий аккаунт
+            existing_account = None
+            all_accounts = account_storage.get_all_accounts()
+            for acc in all_accounts:
+                if acc.get("phone_number") == phone:
+                    existing_account = acc
+                    break
+            
+            if existing_account:
+                # Обновляем существующий аккаунт
+                account_storage.update_account_connection(existing_account["id"], True)
+                account_id = existing_account["id"]
+                print(f"Updated existing account {account_id}", file=sys.stderr, flush=True)
+            else:
+                # Создаем новый аккаунт
+                account_id = account_storage.add_account({
+                    "api_id": api_id_str,
+                    "api_hash": api_hash_str,
+                    "phone_number": phone,
+                    "name": name.strip() if name else None,
+                    "is_connected": True
+                })
+                # Сразу помечаем как подключенный
+                account_storage.update_account_connection(account_id, True)
+                print(f"Created new account {account_id}", file=sys.stderr, flush=True)
+            
+            return {
+                "status": "success",
+                "account_id": account_id,
+                "message": f"Session uploaded successfully! Account: {me.first_name} (@{me.username or 'no username'})",
+                "user_info": {
+                    "id": me.id,
+                    "first_name": me.first_name,
+                    "last_name": me.last_name,
+                    "username": me.username
+                }
+            }
+            
+        except Exception as e:
+            # Сессия невалидна - удаляем файл
+            if os.path.exists(session_path):
+                os.remove(session_path)
+            
+            error_msg = str(e)
+            print(f"Session validation failed: {error_msg}", file=sys.stderr, flush=True)
+            
+            if "AUTH_KEY" in error_msg or "not registered" in error_msg.lower():
+                raise HTTPException(
+                    status_code=400, 
+                    detail="Session file is invalid or expired. Please create a new session locally."
+                )
+            else:
+                raise HTTPException(status_code=400, detail=f"Session validation failed: {error_msg}")
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"Upload session error: {e}", file=sys.stderr, flush=True)
+        import traceback
+        traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 

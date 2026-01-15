@@ -19,3 +19,85 @@
   color: #0c5460;
 }
 
+/* Account buttons */
+.account-buttons {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.account-buttons .btn-secondary {
+  background-color: #6c757d;
+  color: white;
+}
+
+.account-buttons .btn-secondary:hover {
+  background-color: #5a6268;
+}
+
+/* Upload session form */
+.upload-session-form {
+  margin-top: 15px;
+}
+
+.upload-info {
+  background: linear-gradient(135deg, #e8f4fd 0%, #d6eaf8 100%);
+  padding: 15px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+  border-left: 4px solid #3498db;
+}
+
+.upload-info h3 {
+  margin: 0 0 10px 0;
+  color: #2c3e50;
+  font-size: 16px;
+}
+
+.upload-info p {
+  margin: 0 0 10px 0;
+  color: #555;
+  font-size: 14px;
+}
+
+.upload-info ol {
+  margin: 0;
+  padding-left: 20px;
+  color: #555;
+  font-size: 13px;
+}
+
+.upload-info ol li {
+  margin-bottom: 5px;
+}
+
+.upload-info code {
+  background-color: rgba(0, 0, 0, 0.1);
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 12px;
+}
+
+/* File input styling */
+input[type="file"] {
+  padding: 8px;
+  border: 2px dashed #ccc;
+  border-radius: 4px;
+  background-color: #f9f9f9;
+  cursor: pointer;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+input[type="file"]:hover {
+  border-color: #3498db;
+  background-color: #f0f8ff;
+}
+
+.file-selected {
+  display: block;
+  margin-top: 5px;
+  color: #28a745;
+  font-size: 12px;
+}

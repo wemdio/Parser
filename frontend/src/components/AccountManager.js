@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import axios from 'axios';
 import './AccountManager.css';
 import API_BASE from '../config';
@@ -7,11 +7,19 @@ function AccountManager({ onAccountAdded, onAccountVerified }) {
   const [showAddForm, setShowAddForm] = useState(false);
   const [showVerifyForm, setShowVerifyForm] = useState(false);
   const [showRequestNewCode, setShowRequestNewCode] = useState(false);
+  const [showUploadForm, setShowUploadForm] = useState(false);
   const [formData, setFormData] = useState({
     api_id: '',
     api_hash: '',
     phone_number: '',
     name: ''
+  });
+  const [uploadData, setUploadData] = useState({
+    api_id: '',
+    api_hash: '',
+    phone_number: '',
+    name: '',
+    session_file: null
   });
   const [verificationData, setVerificationData] = useState({
     account_id: null,
@@ -21,12 +29,30 @@ function AccountManager({ onAccountAdded, onAccountVerified }) {
   });
   const [message, setMessage] = useState(null);
   const [loading, setLoading] = useState(false);
+  const fileInputRef = useRef(null);
 
   const handleInputChange = (e) => {
     setFormData({
       ...formData,
       [e.target.name]: e.target.value
     });
+  };
+
+  const handleUploadInputChange = (e) => {
+    setUploadData({
+      ...uploadData,
+      [e.target.name]: e.target.value
+    });
+  };
+
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      setUploadData({
+        ...uploadData,
+        session_file: file
+      });
+    }
   };
 
   const handleVerifyInputChange = (e) => {
@@ -190,6 +216,58 @@ function AccountManager({ onAccountAdded, onAccountVerified }) {
     }
   };
 
+  const handleUploadSession = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setMessage(null);
+
+    if (!uploadData.session_file) {
+      setMessage({ type: 'error', text: 'Выберите файл сессии (.session)' });
+      setLoading(false);
+      return;
+    }
+
+    try {
+      const formDataToSend = new FormData();
+      formDataToSend.append('session_file', uploadData.session_file);
+      formDataToSend.append('api_id', uploadData.api_id);
+      formDataToSend.append('api_hash', uploadData.api_hash);
+      formDataToSend.append('phone_number', uploadData.phone_number);
+      if (uploadData.name) {
+        formDataToSend.append('name', uploadData.name);
+      }
+
+      const response = await axios.post(`${API_BASE}/accounts/upload-session`, formDataToSend, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        }
+      });
+
+      console.log('Upload session response:', response.data);
+
+      setMessage({ 
+        type: 'success', 
+        text: response.data.message || 'Сессия успешно загружена!' 
+      });
+      setShowUploadForm(false);
+      setUploadData({ api_id: '', api_hash: '', phone_number: '', name: '', session_file: null });
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
+      onAccountAdded();
+      onAccountVerified();
+    } catch (error) {
+      const errorMessage = error.response?.data?.detail || error.message || 'Ошибка при загрузке сессии';
+      console.error('Error uploading session:', error);
+      setMessage({ 
+        type: 'error', 
+        text: errorMessage 
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="card">
       <h2>Управление аккаунтами</h2>
@@ -200,13 +278,21 @@ function AccountManager({ onAccountAdded, onAccountVerified }) {
         </div>
       )}
 
-      {!showAddForm && !showVerifyForm && (
-        <button 
-          className="btn btn-primary" 
-          onClick={() => setShowAddForm(true)}
-        >
-          Добавить аккаунт
-        </button>
+      {!showAddForm && !showVerifyForm && !showUploadForm && (
+        <div className="account-buttons">
+          <button 
+            className="btn btn-primary" 
+            onClick={() => setShowAddForm(true)}
+          >
+            Добавить аккаунт (код)
+          </button>
+          <button 
+            className="btn btn-secondary" 
+            onClick={() => setShowUploadForm(true)}
+          >
+            Загрузить сессию
+          </button>
+        </div>
       )}
 
       {showAddForm && (
@@ -335,6 +421,105 @@ function AccountManager({ onAccountAdded, onAccountVerified }) {
             </button>
           </div>
         </form>
+      )}
+
+      {showUploadForm && (
+        <div className="upload-session-form">
+          <div className="upload-info">
+            <h3>Загрузка готовой сессии</h3>
+            <p>Если код подтверждения не приходит на сервере, создайте сессию локально:</p>
+            <ol>
+              <li>Запустите на своем компьютере: <code>python create_session_local.py</code></li>
+              <li>Введите API ID, API Hash и номер телефона</li>
+              <li>Получите код в Telegram и введите его</li>
+              <li>Загрузите созданный файл <code>.session</code> сюда</li>
+            </ol>
+          </div>
+          
+          <form onSubmit={handleUploadSession}>
+            <div className="input-group">
+              <label>Файл сессии (.session):</label>
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileChange}
+                accept=".session"
+                required
+              />
+              {uploadData.session_file && (
+                <small className="file-selected">
+                  Выбран: {uploadData.session_file.name}
+                </small>
+              )}
+            </div>
+            
+            <div className="input-group">
+              <label>API ID:</label>
+              <input
+                type="text"
+                name="api_id"
+                value={uploadData.api_id}
+                onChange={handleUploadInputChange}
+                required
+                placeholder="Должен совпадать с тем, что использовался при создании сессии"
+              />
+            </div>
+            
+            <div className="input-group">
+              <label>API Hash:</label>
+              <input
+                type="text"
+                name="api_hash"
+                value={uploadData.api_hash}
+                onChange={handleUploadInputChange}
+                required
+                placeholder="Должен совпадать с тем, что использовался при создании сессии"
+              />
+            </div>
+            
+            <div className="input-group">
+              <label>Номер телефона:</label>
+              <input
+                type="text"
+                name="phone_number"
+                value={uploadData.phone_number}
+                onChange={handleUploadInputChange}
+                required
+                placeholder="+79991234567"
+              />
+            </div>
+            
+            <div className="input-group">
+              <label>Имя аккаунта (необязательно):</label>
+              <input
+                type="text"
+                name="name"
+                value={uploadData.name}
+                onChange={handleUploadInputChange}
+                placeholder="Мой аккаунт"
+              />
+            </div>
+            
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button type="submit" className="btn btn-primary" disabled={loading}>
+                {loading ? 'Загрузка...' : 'Загрузить сессию'}
+              </button>
+              <button 
+                type="button" 
+                className="btn" 
+                onClick={() => {
+                  setShowUploadForm(false);
+                  setUploadData({ api_id: '', api_hash: '', phone_number: '', name: '', session_file: null });
+                  if (fileInputRef.current) {
+                    fileInputRef.current.value = '';
+                  }
+                }}
+              >
+                Отмена
+              </button>
+            </div>
+          </form>
+        </div>
       )}
     </div>
   );
