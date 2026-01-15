@@ -256,9 +256,16 @@ class TelegramService:
         phone_number: str, 
         chat_ids: List[int],
         hours_back: int = 1
-    ) -> List[Dict]:
-        """Парсит сообщения за последние N часов из указанных чатов"""
+    ) -> Dict:
+        """Парсит сообщения за последние N часов из указанных чатов
+        
+        Returns:
+            Dict with:
+                - messages: List[Dict] - список спарсенных сообщений
+                - stats: List[Dict] - статистика по каждому чату
+        """
         from datetime import datetime, timedelta, timezone
+        import time
         
         client = await self.create_client(api_id, api_hash, phone_number)
         
@@ -282,6 +289,8 @@ class TelegramService:
                 print(f">>> ⚠️ Warning: Could not load all dialogs: {e}", flush=True)
             
             messages_data = []
+            parsing_stats = []  # 📊 Статистика по каждому чату
+            
             # Используем UTC время для сравнения
             from datetime import timezone
             current_time = datetime.now(timezone.utc)
@@ -292,10 +301,26 @@ class TelegramService:
             print(f">>> Will ONLY save messages AFTER {time_limit.strftime('%H:%M:%S')}", flush=True)
             
             for chat_id in chat_ids:
+                chat_start_time = time.time()  # ⏱️ Время начала парсинга чата
+                chat_stat = {
+                    "chat_id": chat_id,
+                    "chat_name": f"Chat {chat_id}",
+                    "messages_found": 0,
+                    "messages_saved": 0,
+                    "messages_skipped": 0,
+                    "status": "success",
+                    "error_type": None,
+                    "error_message": None,
+                    "started_at": datetime.now(timezone.utc),
+                    "execution_time_seconds": 0
+                }
                 try:
                     chat = await client.get_chat(chat_id)
                     chat_title = chat.title if hasattr(chat, 'title') else f"Chat {chat_id}"
                     chat_username = chat.username if hasattr(chat, 'username') else None
+                    
+                    # Обновляем название чата в статистике
+                    chat_stat["chat_name"] = chat_title
                     
                     # Получаем сообщения с ограничением по времени
                     messages_in_chat = 0
@@ -336,10 +361,13 @@ class TelegramService:
                         # Проверяем что сообщение в пределах времени
                         if msg_date < time_limit:
                             skipped_old += 1
+                            chat_stat["messages_skipped"] += 1  # 📊 Счётчик пропущенных сообщений
                             # Логируем первое пропущенное сообщение
                             if skipped_old == 1:
                                 print(f"    ✗ STOP: Message too old: {msg_date.strftime('%Y-%m-%d %H:%M:%S')} < {time_limit.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
                             break  # Старые сообщения - прекращаем (история идет от новых к старым)
+                        
+                        chat_stat["messages_found"] += 1  # 📊 Счётчик найденных сообщений
                         
                         # Получаем информацию о пользователе
                         user_info = {}
@@ -456,28 +484,63 @@ class TelegramService:
                             
                             messages_data.append(message_data)
                             messages_in_chat += 1
+                            chat_stat["messages_saved"] += 1  # 📊 Счётчик сохранённых сообщений
                     
                     print(f">>> RESULT for '{chat_title}':", flush=True)
                     print(f"    - Checked: {total_checked} messages", flush=True)
                     print(f"    - Saved: {messages_in_chat} messages (within last hour)", flush=True)
                     print(f"    - Skipped: {skipped_old} messages (too old)", flush=True)
+                    
+                    # ✅ Финализируем статистику
+                    chat_stat["execution_time_seconds"] = time.time() - chat_start_time
+                    chat_stat["finished_at"] = datetime.now(timezone.utc)
+                    parsing_stats.append(chat_stat)
                 
                 except FloodWait as e:
                     # 🔥 АВТОМАТИЧЕСКОЕ ОЖИДАНИЕ при rate limit
                     print(f"⏳ Rate limit for chat {chat_id}: waiting {e.value} seconds...", flush=True)
                     await asyncio.sleep(e.value)
                     print(f"✅ Wait complete, continuing to next chat", flush=True)
+                    
+                    # 📊 Сохраняем статистику с ошибкой
+                    chat_stat["status"] = "error"
+                    chat_stat["error_type"] = "FLOOD_WAIT"
+                    chat_stat["error_message"] = f"Rate limit: waited {e.value} seconds"
+                    chat_stat["execution_time_seconds"] = time.time() - chat_start_time
+                    chat_stat["finished_at"] = datetime.now(timezone.utc)
+                    parsing_stats.append(chat_stat)
                     continue
                 except PeerIdInvalid:
                     # ⚠️ Чат недоступен (выгнали, удален, или нет прав)
                     print(f"⚠️ Chat {chat_id} is not accessible (kicked, deleted, or no access). Skipping.", flush=True)
+                    
+                    # 📊 Сохраняем статистику с ошибкой
+                    chat_stat["status"] = "skipped"
+                    chat_stat["error_type"] = "PeerIdInvalid"
+                    chat_stat["error_message"] = "Chat not accessible (kicked, deleted, or no access)"
+                    chat_stat["execution_time_seconds"] = time.time() - chat_start_time
+                    chat_stat["finished_at"] = datetime.now(timezone.utc)
+                    parsing_stats.append(chat_stat)
                     continue
                 except Exception as e:
                     print(f"❌ Error parsing chat {chat_id}: {e}", flush=True)
+                    
+                    # 📊 Сохраняем статистику с ошибкой
+                    chat_stat["status"] = "error"
+                    chat_stat["error_type"] = "Other"
+                    chat_stat["error_message"] = str(e)
+                    chat_stat["execution_time_seconds"] = time.time() - chat_start_time
+                    chat_stat["finished_at"] = datetime.now(timezone.utc)
+                    parsing_stats.append(chat_stat)
                     continue
             
             await client.disconnect()
-            return messages_data
+            
+            # 📊 Возвращаем сообщения и статистику
+            return {
+                "messages": messages_data,
+                "stats": parsing_stats
+            }
             
         except Exception as e:
             if client and client.is_connected:

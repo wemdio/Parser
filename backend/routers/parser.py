@@ -148,4 +148,3 @@ async def resume_schedule(request: Request):
     except Exception as e:
         print(f"\nSCHEDULE RESUME ERROR: {str(e)}", file=sys.stderr, flush=True)
         raise HTTPException(status_code=500, detail=str(e))
-

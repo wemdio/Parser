@@ -1,63 +1,43 @@
-import React, { useState, useEffect } from 'react';
-import axios from 'axios';
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
 import './index.css';
-import AccountManager from './components/AccountManager';
-import AccountList from './components/AccountList';
-import ChatSelector from './components/ChatSelector';
-import ParserControls from './components/ParserControls';
-import API_BASE from './config';
+import HomePage from './pages/HomePage';
+import ParsingStats from './components/ParsingStats';
+
+function Navigation() {
+  const location = useLocation();
+  
+  return (
+    <nav className="navigation">
+      <Link 
+        to="/" 
+        className={`nav-link ${location.pathname === '/' ? 'active' : ''}`}
+      >
+        🏠 Главная
+      </Link>
+      <Link 
+        to="/stats" 
+        className={`nav-link ${location.pathname === '/stats' ? 'active' : ''}`}
+      >
+        📊 Статистика
+      </Link>
+    </nav>
+  );
+}
 
 function App() {
-  const [accounts, setAccounts] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    loadAccounts();
-  }, []);
-
-  const loadAccounts = async () => {
-    try {
-      setLoading(true);
-      const response = await axios.get(`${API_BASE}/accounts/`);
-      setAccounts(response.data.accounts || []);
-      setError(null);
-    } catch (err) {
-      setError('Ошибка загрузки аккаунтов: ' + (err.response?.data?.detail || err.message));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleAccountAdded = () => {
-    loadAccounts();
-  };
-
-  const handleAccountVerified = () => {
-    loadAccounts();
-  };
-
-  if (loading && accounts.length === 0) {
-    return <div className="loading">Загрузка...</div>;
-  }
-
   return (
-    <div className="container">
-      <h1>Telegram Chat Parser</h1>
-      
-      {error && <div className="error-message">{error}</div>}
-
-      <AccountManager 
-        onAccountAdded={handleAccountAdded}
-        onAccountVerified={handleAccountVerified}
-      />
-
-      <AccountList accounts={accounts} onRefresh={loadAccounts} />
-
-      <ChatSelector accounts={accounts} />
-
-      <ParserControls />
-    </div>
+    <Router>
+      <div className="container">
+        <h1>Telegram Chat Parser</h1>
+        <Navigation />
+        
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/stats" element={<ParsingStats />} />
+        </Routes>
+      </div>
+    </Router>
   );
 }
 

@@ -119,4 +119,24 @@ class SupabaseClient:
             import traceback
             traceback.print_exc()
             return False
+    
+    def insert_parsing_logs_batch(self, logs: list) -> bool:
+        """Вставляет пакет логов парсинга"""
+        if not self.client:
+            print("⚠️ WARNING: Supabase client not initialized. Parsing logs not saved!", flush=True)
+            return False
+        
+        if not logs:
+            return True
+            
+        try:
+            print(f"📊 Inserting {len(logs)} parsing logs to Supabase...", flush=True)
+            result = self.client.table('parsing_logs').insert(logs).execute()
+            print(f"✅ Successfully inserted {len(logs)} parsing logs!", flush=True)
+            return True
+        except Exception as e:
+            print(f"❌ ERROR inserting parsing logs: {e}", flush=True)
+            import traceback
+            traceback.print_exc()
+            return False
 
