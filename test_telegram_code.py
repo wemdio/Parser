@@ -1,0 +1,89 @@
+"""
+Минимальный скрипт для теста отправки кода в Telegram
+"""
+import asyncio
+from pyrogram import Client
+
+async def test_send_code():
+    # ВСТАВЬТЕ ВАШИ ДАННЫЕ ЗДЕСЬ
+    api_id = "YOUR_API_ID"  # Замените на реальный
+    api_hash = "YOUR_API_HASH"  # Замените на реальный
+    phone = "+79991234567"  # Замените на реальный номер
+    
+    print(f"\n{'='*60}")
+    print(f"Testing Telegram code sending")
+    print(f"Phone: {phone}")
+    print(f"API ID: {api_id}")
+    print(f"{'='*60}\n")
+    
+    client = Client(
+        f"test_{phone}",
+        api_id=int(api_id),
+        api_hash=api_hash,
+        phone_number=phone
+    )
+    
+    try:
+        await client.connect()
+        print("✅ Connected to Telegram")
+        
+        # Проверяем авторизацию
+        try:
+            me = await client.get_me()
+            print(f"✅ Already authorized as: {me.first_name}")
+            await client.disconnect()
+            return
+        except Exception as e:
+            print(f"❌ Not authorized: {e}")
+        
+        # Отправляем код
+        print("\n🔄 Sending code...")
+        sent_code = await client.send_code(phone)
+        
+        print(f"\n{'='*60}")
+        print(f"✅ CODE REQUEST SENT!")
+        print(f"Phone code hash: {sent_code.phone_code_hash}")
+        print(f"Type: {sent_code.type}")
+        
+        # Проверяем тип отправки
+        if hasattr(sent_code, 'type'):
+            print(f"Send type: {sent_code.type}")
+            if sent_code.type == 'app':
+                print("📱 Code will be sent to Telegram app")
+            elif sent_code.type == 'sms':
+                print("📱 Code will be sent via SMS")
+            elif sent_code.type == 'call':
+                print("📞 Code will be sent via phone call")
+            elif sent_code.type == 'flash_call':
+                print("📞 Code will be sent via flash call")
+        
+        print(f"{'='*60}\n")
+        
+        print("⏳ Check your Telegram app NOW!")
+        print("   Look for message from 'Telegram' (blue-white icon)")
+        print("   Code format: 5 digits like '12345'")
+        print("\nDid you receive the code? (yes/no)")
+        
+        await client.disconnect()
+        
+    except Exception as e:
+        print(f"\n❌ ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        if client.is_connected:
+            await client.disconnect()
+
+if __name__ == "__main__":
+    print("\n" + "="*60)
+    print("TELEGRAM CODE TEST SCRIPT")
+    print("="*60)
+    print("\n⚠️  BEFORE RUNNING:")
+    print("1. Edit this file and replace:")
+    print("   - YOUR_API_ID with your api_id")
+    print("   - YOUR_API_HASH with your api_hash")
+    print("   - +79991234567 with your phone number")
+    print("\n2. Make sure Telegram app is OPEN on this phone")
+    print("\n3. Run: python test_telegram_code.py")
+    print("\n" + "="*60 + "\n")
+    
+    asyncio.run(test_send_code())
