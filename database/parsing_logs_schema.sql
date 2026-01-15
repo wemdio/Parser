@@ -41,8 +41,12 @@ CREATE INDEX IF NOT EXISTS idx_parsing_logs_status ON parsing_logs(status);
 -- Включение Row Level Security (опционально)
 ALTER TABLE parsing_logs ENABLE ROW LEVEL SECURITY;
 
+-- Удаляем политики если существуют (чтобы избежать ошибок)
+DROP POLICY IF EXISTS "Allow all read operations" ON parsing_logs;
+DROP POLICY IF EXISTS "Allow all insert operations" ON parsing_logs;
+
 -- Политика для чтения всех записей (если используете анонимный ключ)
-CREATE POLICY IF NOT EXISTS "Allow all read operations" ON parsing_logs FOR SELECT USING (true);
+CREATE POLICY "Allow all read operations" ON parsing_logs FOR SELECT USING (true);
 
 -- Политика для записи всех записей (если используете анонимный ключ)
-CREATE POLICY IF NOT EXISTS "Allow all insert operations" ON parsing_logs FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow all insert operations" ON parsing_logs FOR INSERT WITH CHECK (true);
