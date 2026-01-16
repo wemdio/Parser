@@ -229,78 +229,6 @@ async def get_accounts():
     accounts = account_storage.get_all_accounts()
     return {"accounts": accounts}
 
-@router.get("/{account_id}")
-async def get_account(account_id: int):
-    """Получает информацию об аккаунте по ID"""
-    account = account_storage.get_account(account_id)
-    if not account:
-        raise HTTPException(status_code=404, detail="Account not found")
-    return account
-
-@router.delete("/{account_id}")
-async def delete_account(account_id: int):
-    """Удаляет аккаунт"""
-    try:
-        account = account_storage.get_account(account_id)
-        if not account:
-            raise HTTPException(status_code=404, detail="Account not found")
-        
-        # Получаем путь к файлу сессии для удаления
-        phone_number = account.get("phone_number")
-        if phone_number:
-            from backend.services.telegram_service import TelegramService
-            telegram_service = TelegramService()
-            session_path = telegram_service.get_session_path(phone_number)
-            import os
-            if os.path.exists(session_path):
-                try:
-                    os.remove(session_path)
-                    print(f"Deleted session file: {session_path}")
-                except Exception as e:
-                    print(f"Warning: Could not delete session file: {e}")
-        
-        success = account_storage.delete_account(account_id)
-        if success:
-            return {"status": "success", "message": "Account deleted successfully"}
-        else:
-            raise HTTPException(status_code=404, detail="Account not found")
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-@router.post("/{account_id}/check-status")
-async def check_account_status(account_id: int):
-    """Проверяет статус подключения аккаунта"""
-    try:
-        account = account_storage.get_account(account_id)
-        if not account:
-            raise HTTPException(status_code=404, detail="Account not found")
-        
-        # Проверяем, есть ли валидная сессия
-        try:
-            result = await telegram_service.connect_account(
-                account["api_id"],
-                account["api_hash"],
-                account["phone_number"]
-            )
-            
-            if result.get("status") == "already_connected":
-                account_storage.update_account_connection(account_id, True)
-                return {"is_connected": True, "status": "connected"}
-            else:
-                account_storage.update_account_connection(account_id, False)
-                return {"is_connected": False, "status": "not_connected"}
-        except Exception as e:
-            account_storage.update_account_connection(account_id, False)
-            return {"is_connected": False, "status": "error", "message": str(e)}
-    
-    except HTTPException:
-        raise
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
 @router.post("/upload-session")
 async def upload_session(
     session_file: UploadFile = File(...),
@@ -453,5 +381,76 @@ async def upload_session(
         print(f"Upload session error: {e}", file=sys.stderr, flush=True)
         import traceback
         traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/{account_id}")
+async def get_account(account_id: int):
+    """Получает информацию об аккаунте по ID"""
+    account = account_storage.get_account(account_id)
+    if not account:
+        raise HTTPException(status_code=404, detail="Account not found")
+    return account
+
+@router.delete("/{account_id}")
+async def delete_account(account_id: int):
+    """Удаляет аккаунт"""
+    try:
+        account = account_storage.get_account(account_id)
+        if not account:
+            raise HTTPException(status_code=404, detail="Account not found")
+        
+        # Получаем путь к файлу сессии для удаления
+        phone_number = account.get("phone_number")
+        if phone_number:
+            from backend.services.telegram_service import TelegramService
+            telegram_service = TelegramService()
+            session_path = telegram_service.get_session_path(phone_number)
+            import os
+            if os.path.exists(session_path):
+                try:
+                    os.remove(session_path)
+                    print(f"Deleted session file: {session_path}")
+                except Exception as e:
+                    print(f"Warning: Could not delete session file: {e}")
+        
+        success = account_storage.delete_account(account_id)
+        if success:
+            return {"status": "success", "message": "Account deleted successfully"}
+        else:
+            raise HTTPException(status_code=404, detail="Account not found")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/{account_id}/check-status")
+async def check_account_status(account_id: int):
+    """Проверяет статус подключения аккаунта"""
+    try:
+        account = account_storage.get_account(account_id)
+        if not account:
+            raise HTTPException(status_code=404, detail="Account not found")
+        
+        # Проверяем, есть ли валидная сессия
+        try:
+            result = await telegram_service.connect_account(
+                account["api_id"],
+                account["api_hash"],
+                account["phone_number"]
+            )
+            
+            if result.get("status") == "already_connected":
+                account_storage.update_account_connection(account_id, True)
+                return {"is_connected": True, "status": "connected"}
+            else:
+                account_storage.update_account_connection(account_id, False)
+                return {"is_connected": False, "status": "not_connected"}
+        except Exception as e:
+            account_storage.update_account_connection(account_id, False)
+            return {"is_connected": False, "status": "error", "message": str(e)}
+    
+    except HTTPException:
+        raise
+    except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
