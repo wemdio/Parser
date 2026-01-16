@@ -83,6 +83,18 @@ async def add_account(account_data: AccountCreateRequest):
         if existing_account:
             # Если аккаунт существует и не подключен, пытаемся запросить новый код
             if not existing_account.get("is_connected", False):
+                # ВАЖНО: Удаляем старую невалидную сессию перед запросом нового кода
+                from backend.services.telegram_service import TelegramService
+                temp_service = TelegramService()
+                session_path = temp_service.get_session_path(phone)
+                for path in [session_path, session_path + ".session", f"{session_path}.session"]:
+                    if os.path.exists(path):
+                        try:
+                            os.remove(path)
+                            print(f"Removed old session for existing account: {path}")
+                        except Exception as e:
+                            print(f"Could not remove session {path}: {e}")
+                
                 # Попытаемся запросить новый код для существующего аккаунта
                 try:
                     result = await telegram_service.connect_account(
