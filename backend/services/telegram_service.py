@@ -17,16 +17,33 @@ class TelegramService:
         safe_phone = phone_number.replace("+", "").replace("-", "").replace(" ", "")
         return os.path.join(self.sessions_dir, f"{safe_phone}.session")
     
-    async def create_client(self, api_id: str, api_hash: str, phone_number: str) -> Optional[Client]:
-        """Создает клиент Telegram"""
+    async def create_client(self, api_id: str, api_hash: str, phone_number: str, use_existing_session: bool = False) -> Optional[Client]:
+        """
+        Создает клиент Telegram.
+        
+        Args:
+            use_existing_session: Если True, НЕ передаём phone_number в Client,
+                                  чтобы использовать существующую сессию без переавторизации.
+        """
         try:
             session_path = self.get_session_path(phone_number)
-            client = Client(
-                session_path,
-                api_id=int(api_id),
-                api_hash=api_hash,
-                phone_number=phone_number
-            )
+            
+            if use_existing_session:
+                # Для существующих сессий - НЕ передаём phone_number!
+                # Это предотвращает попытку переавторизации
+                client = Client(
+                    session_path,
+                    api_id=int(api_id),
+                    api_hash=api_hash
+                )
+            else:
+                # Для новой авторизации - передаём phone_number
+                client = Client(
+                    session_path,
+                    api_id=int(api_id),
+                    api_hash=api_hash,
+                    phone_number=phone_number
+                )
             return client
         except Exception as e:
             print(f"Error creating client: {e}")
@@ -217,7 +234,8 @@ class TelegramService:
     
     async def get_chats(self, api_id: str, api_hash: str, phone_number: str) -> List[Dict]:
         """Получает список чатов для аккаунта"""
-        client = await self.create_client(api_id, api_hash, phone_number)
+        # Используем существующую сессию без попытки переавторизации
+        client = await self.create_client(api_id, api_hash, phone_number, use_existing_session=True)
         
         if not client:
             raise Exception("Failed to create client")
@@ -267,7 +285,8 @@ class TelegramService:
         from datetime import datetime, timedelta, timezone
         import time
         
-        client = await self.create_client(api_id, api_hash, phone_number)
+        # Используем существующую сессию без попытки переавторизации
+        client = await self.create_client(api_id, api_hash, phone_number, use_existing_session=True)
         
         if not client:
             raise Exception("Failed to create client")
