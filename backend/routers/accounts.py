@@ -437,29 +437,48 @@ async def delete_account(account_id: int):
 
 @router.post("/{account_id}/check-status")
 async def check_account_status(account_id: int):
-    """Проверяет статус подключения аккаунта"""
+    """Проверяет статус подключения аккаунта - только проверка, без запроса кода"""
+    import sys
     try:
         account = account_storage.get_account(account_id)
         if not account:
             raise HTTPException(status_code=404, detail="Account not found")
         
-        # Проверяем, есть ли валидная сессия
+        phone = account.get("phone_number", "")
+        phone_clean = phone.replace("+", "").replace(" ", "").replace("-", "")
+        
+        # Проверяем наличие файла сессии
+        session_path = f"sessions/{phone_clean}.session"
+        if not os.path.exists(session_path):
+            print(f"check-status: No session file for {phone}", file=sys.stderr, flush=True)
+            account_storage.update_account_connection(account_id, False)
+            return {"is_connected": False, "status": "no_session"}
+        
+        # Пробуем подключиться с существующей сессией (без запроса кода!)
+        from pyrogram import Client
+        
         try:
-            result = await telegram_service.connect_account(
-                account["api_id"],
-                account["api_hash"],
-                account["phone_number"]
+            client = Client(
+                f"sessions/{phone_clean}",
+                api_id=int(account["api_id"]),
+                api_hash=account["api_hash"]
             )
             
-            if result.get("status") == "already_connected":
-                account_storage.update_account_connection(account_id, True)
-                return {"is_connected": True, "status": "connected"}
-            else:
-                account_storage.update_account_connection(account_id, False)
-                return {"is_connected": False, "status": "not_connected"}
+            await client.start()
+            me = await client.get_me()
+            await client.stop()
+            
+            print(f"check-status: Session valid for {phone} - {me.first_name}", file=sys.stderr, flush=True)
+            account_storage.update_account_connection(account_id, True)
+            return {"is_connected": True, "status": "connected", "user": me.first_name}
+            
         except Exception as e:
+            error_msg = str(e)
+            print(f"check-status: Session invalid for {phone}: {error_msg}", file=sys.stderr, flush=True)
+            
+            # НЕ удаляем сессию и НЕ запрашиваем код - просто сообщаем статус
             account_storage.update_account_connection(account_id, False)
-            return {"is_connected": False, "status": "error", "message": str(e)}
+            return {"is_connected": False, "status": "session_invalid", "message": error_msg}
     
     except HTTPException:
         raise
