@@ -235,38 +235,57 @@ class TelegramService:
     
     async def get_chats(self, api_id: str, api_hash: str, phone_number: str) -> List[Dict]:
         """Получает список чатов для аккаунта"""
-        # Используем существующую сессию без попытки переавторизации
-        client = await self.create_client(api_id, api_hash, phone_number, use_existing_session=True)
+        import sys
         
-        if not client:
-            raise Exception("Failed to create client")
+        # Retry logic для "database is locked" ошибки
+        max_retries = 3
+        retry_delay = 2  # секунды
         
-        try:
-            await client.connect()
-            
-            if not client.is_connected:
-                raise Exception("Not connected")
-            
-            chats = []
-            async for dialog in client.get_dialogs():
-                chat = dialog.chat
-                if chat and (chat.type.value in ["group", "supergroup", "channel"]):
-                    chats.append({
-                        "id": chat.id,
-                        "title": chat.title,
-                        "username": chat.username
-                    })
-            
-            await client.disconnect()
-            return chats
-            
-        except Exception as e:
-            if client and client.is_connected:
-                try:
-                    await client.disconnect()
-                except:
-                    pass
-            raise Exception(f"Error getting chats: {str(e)}")
+        for attempt in range(max_retries):
+            client = None
+            try:
+                # Используем существующую сессию без попытки переавторизации
+                client = await self.create_client(api_id, api_hash, phone_number, use_existing_session=True)
+                
+                if not client:
+                    raise Exception("Failed to create client")
+                
+                await client.connect()
+                
+                if not client.is_connected:
+                    raise Exception("Not connected")
+                
+                chats = []
+                async for dialog in client.get_dialogs():
+                    chat = dialog.chat
+                    if chat and (chat.type.value in ["group", "supergroup", "channel"]):
+                        chats.append({
+                            "id": chat.id,
+                            "title": chat.title,
+                            "username": chat.username
+                        })
+                
+                await client.disconnect()
+                return chats
+                
+            except Exception as e:
+                error_msg = str(e)
+                
+                # Закрываем клиент если открыт
+                if client:
+                    try:
+                        if client.is_connected:
+                            await client.disconnect()
+                    except:
+                        pass
+                
+                # Если "database is locked" - пробуем снова
+                if "database is locked" in error_msg.lower() and attempt < max_retries - 1:
+                    print(f"get_chats: Database locked, retry {attempt + 1}/{max_retries} in {retry_delay}s...", file=sys.stderr, flush=True)
+                    await asyncio.sleep(retry_delay)
+                    continue
+                
+                raise Exception(f"Error getting chats: {error_msg}")
     
     async def parse_messages(
         self, 

@@ -456,7 +456,9 @@ async def check_account_status(account_id: int):
         
         # Пробуем подключиться с существующей сессией (без запроса кода!)
         from pyrogram import Client
+        import asyncio
         
+        client = None
         try:
             client = Client(
                 f"sessions/{phone_clean}",
@@ -468,6 +470,9 @@ async def check_account_status(account_id: int):
             me = await client.get_me()
             await client.stop()
             
+            # Даём время на освобождение файла
+            await asyncio.sleep(0.5)
+            
             print(f"check-status: Session valid for {phone} - {me.first_name}", file=sys.stderr, flush=True)
             account_storage.update_account_connection(account_id, True)
             return {"is_connected": True, "status": "connected", "user": me.first_name}
@@ -475,6 +480,13 @@ async def check_account_status(account_id: int):
         except Exception as e:
             error_msg = str(e)
             print(f"check-status: Session invalid for {phone}: {error_msg}", file=sys.stderr, flush=True)
+            
+            # Закрываем клиент если открыт
+            if client:
+                try:
+                    await client.stop()
+                except:
+                    pass
             
             # НЕ удаляем сессию и НЕ запрашиваем код - просто сообщаем статус
             account_storage.update_account_connection(account_id, False)
