@@ -13,9 +13,10 @@ class TelegramService:
         self._active_clients = {}  # {phone_number: client}
     
     def get_session_path(self, phone_number: str) -> str:
-        """Получает путь к файлу сессии"""
+        """Получает путь к файлу сессии (БЕЗ .session - Pyrogram добавит сам)"""
         safe_phone = phone_number.replace("+", "").replace("-", "").replace(" ", "")
-        return os.path.join(self.sessions_dir, f"{safe_phone}.session")
+        # НЕ добавляем .session - Pyrogram сам добавляет при создании Client
+        return os.path.join(self.sessions_dir, safe_phone)
     
     async def create_client(self, api_id: str, api_hash: str, phone_number: str, use_existing_session: bool = False) -> Optional[Client]:
         """
