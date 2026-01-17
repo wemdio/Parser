@@ -316,20 +316,49 @@ async def upload_session(
         
         print(f"Session file saved, size: {len(content)} bytes", file=sys.stderr, flush=True)
         
-        # Проверяем валидность сессии
+        # Проверяем что файл - это валидный SQLite
+        import sqlite3
+        
+        try:
+            print("Checking session file format...", file=sys.stderr, flush=True)
+            conn = sqlite3.connect(session_path)
+            cursor = conn.cursor()
+            # Pyrogram сессии содержат таблицы sessions и peers
+            cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            tables = [t[0] for t in cursor.fetchall()]
+            conn.close()
+            
+            if 'sessions' not in tables and 'peers' not in tables:
+                raise ValueError("Not a valid Pyrogram session file")
+            
+            print(f"Session file is valid SQLite with tables: {tables}", file=sys.stderr, flush=True)
+        except Exception as e:
+            if os.path.exists(session_path):
+                os.remove(session_path)
+            raise HTTPException(status_code=400, detail=f"Invalid session file format: {e}")
+        
+        # Теперь пробуем подключиться (без phone_number - не будет запрашивать код)
         from pyrogram import Client
         
         test_client = Client(
             f"sessions/{phone_clean}",
             api_id=api_id_int,
             api_hash=api_hash_str
+            # НЕ передаём phone_number - Pyrogram не будет пытаться авторизоваться
         )
         
         try:
             print("Testing session validity...", file=sys.stderr, flush=True)
-            await test_client.start()
-            me = await test_client.get_me()
-            await test_client.stop()
+            await test_client.connect()
+            
+            # Пробуем получить информацию о пользователе
+            try:
+                me = await test_client.get_me()
+            except Exception as me_error:
+                await test_client.disconnect()
+                raise me_error
+                
+            await test_client.disconnect()
             
             print(f"Session valid! User: {me.first_name} (@{me.username})", file=sys.stderr, flush=True)
             
@@ -373,6 +402,11 @@ async def upload_session(
             
         except Exception as e:
             # Сессия невалидна - удаляем файл
+            try:
+                await test_client.disconnect()
+            except:
+                pass
+                
             if os.path.exists(session_path):
                 os.remove(session_path)
             

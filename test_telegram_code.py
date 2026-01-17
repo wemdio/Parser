@@ -1,14 +1,20 @@
 """
 Минимальный скрипт для теста отправки кода в Telegram
 """
+import sys
+import codecs
+# Fix Windows encoding
+if sys.platform == "win32":
+    sys.stdout = codecs.getwriter("utf-8")(sys.stdout.detach())
+
 import asyncio
 from pyrogram import Client
 
 async def test_send_code():
     # ВСТАВЬТЕ ВАШИ ДАННЫЕ ЗДЕСЬ
-    api_id = "YOUR_API_ID"  # Замените на реальный
-    api_hash = "YOUR_API_HASH"  # Замените на реальный
-    phone = "+79991234567"  # Замените на реальный номер
+    api_id = "28175657"  # Замените на реальный
+    api_hash = "0bba767d56632e4cc6e3831c3e7d3ef6"  # Замените на реальный
+    phone = "+79996472302"  # Замените на реальный номер
     
     print(f"\n{'='*60}")
     print(f"Testing Telegram code sending")
@@ -77,13 +83,7 @@ if __name__ == "__main__":
     print("\n" + "="*60)
     print("TELEGRAM CODE TEST SCRIPT")
     print("="*60)
-    print("\n⚠️  BEFORE RUNNING:")
-    print("1. Edit this file and replace:")
-    print("   - YOUR_API_ID with your api_id")
-    print("   - YOUR_API_HASH with your api_hash")
-    print("   - +79991234567 with your phone number")
-    print("\n2. Make sure Telegram app is OPEN on this phone")
-    print("\n3. Run: python test_telegram_code.py")
-    print("\n" + "="*60 + "\n")
+    print("\nRunning test...")
+    print("="*60 + "\n")
     
     asyncio.run(test_send_code())
