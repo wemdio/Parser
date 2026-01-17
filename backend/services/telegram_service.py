@@ -53,6 +53,17 @@ class TelegramService:
     async def connect_account(self, api_id: str, api_hash: str, phone_number: str) -> Dict:
         """Подключает аккаунт и запрашивает код подтверждения"""
         client = None
+        session_path = self.get_session_path(phone_number)
+        
+        # СНАЧАЛА удаляем старую сессию если есть - это решает AUTH_KEY_UNREGISTERED
+        for path in [session_path, f"{session_path}.session"]:
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                    print(f"Removed old session file: {path}")
+                except Exception as e:
+                    print(f"Could not remove old session {path}: {e}")
+        
         try:
             client = await self.create_client(api_id, api_hash, phone_number)
             
@@ -72,9 +83,31 @@ class TelegramService:
                     await client.disconnect()
                     return {"status": "already_connected"}
             except Exception as check_error:
-                # Не авторизован, нужно запросить код
+                error_str = str(check_error)
                 print(f"Not authorized yet, will request code. Check error: {check_error}")
-                pass
+                
+                # Если AUTH_KEY_UNREGISTERED - нужно пересоздать клиента
+                if "AUTH_KEY_UNREGISTERED" in error_str or "not registered" in error_str.lower():
+                    print("AUTH_KEY_UNREGISTERED detected, recreating session...")
+                    try:
+                        await client.disconnect()
+                    except:
+                        pass
+                    
+                    # Удаляем сессию ещё раз
+                    for path in [session_path, f"{session_path}.session"]:
+                        if os.path.exists(path):
+                            try:
+                                os.remove(path)
+                                print(f"Removed invalid session: {path}")
+                            except:
+                                pass
+                    
+                    # Создаём новый клиент
+                    client = await self.create_client(api_id, api_hash, phone_number)
+                    if not client:
+                        raise Exception("Failed to recreate client after AUTH_KEY_UNREGISTERED")
+                    await client.connect()
             
             # Проверяем, нужна ли авторизация - запрашиваем код
             try:
