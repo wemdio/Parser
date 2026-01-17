@@ -271,6 +271,23 @@ class TelegramService:
         import sys
         import sqlite3
         
+        print(f"\n{'='*50}", file=sys.stderr, flush=True)
+        print(f"GET_CHATS for {phone_number}", file=sys.stderr, flush=True)
+        print(f"{'='*50}", file=sys.stderr, flush=True)
+        
+        # ВАЖНО: Закрываем старый клиент если он застрял в памяти
+        if phone_number in self._active_clients:
+            try:
+                old_client = self._active_clients[phone_number]
+                print(f"Found stale client in memory, closing...", file=sys.stderr, flush=True)
+                if old_client.is_connected:
+                    await old_client.disconnect()
+                del self._active_clients[phone_number]
+                await asyncio.sleep(2)  # Даём время освободить файл
+                print(f"Stale client closed", file=sys.stderr, flush=True)
+            except Exception as e:
+                print(f"Error closing stale client: {e}", file=sys.stderr, flush=True)
+        
         # Retry logic для "database is locked" ошибки
         max_retries = 5
         retry_delay = 3  # секунды
@@ -278,11 +295,15 @@ class TelegramService:
         # Попробуем включить WAL mode для сессии
         session_path = self.get_session_path(phone_number)
         session_file = f"{session_path}.session"
+        print(f"Session file: {session_file}", file=sys.stderr, flush=True)
+        print(f"Session exists: {os.path.exists(session_file)}", file=sys.stderr, flush=True)
+        
         if os.path.exists(session_file):
             try:
                 conn = sqlite3.connect(session_file, timeout=30)
                 conn.execute("PRAGMA journal_mode=WAL")
                 conn.close()
+                print(f"WAL mode enabled", file=sys.stderr, flush=True)
             except Exception as wal_err:
                 print(f"Could not set WAL mode: {wal_err}", file=sys.stderr, flush=True)
         
@@ -293,16 +314,21 @@ class TelegramService:
                 if attempt > 0:
                     await asyncio.sleep(1)
                 
+                print(f"Attempt {attempt + 1}/{max_retries}", file=sys.stderr, flush=True)
+                
                 # Используем существующую сессию без попытки переавторизации
                 client = await self.create_client(api_id, api_hash, phone_number, use_existing_session=True)
                 
                 if not client:
                     raise Exception("Failed to create client")
                 
+                print(f"Client created, connecting...", file=sys.stderr, flush=True)
                 await client.connect()
                 
                 if not client.is_connected:
                     raise Exception("Not connected")
+                
+                print(f"Connected! Getting dialogs...", file=sys.stderr, flush=True)
                 
                 chats = []
                 async for dialog in client.get_dialogs():
@@ -314,15 +340,37 @@ class TelegramService:
                             "username": chat.username
                         })
                 
+                print(f"Found {len(chats)} chats", file=sys.stderr, flush=True)
+                
                 await client.disconnect()
                 
                 # Даём время на освобождение файла
                 await asyncio.sleep(0.5)
                 
+                print(f"SUCCESS! Returning {len(chats)} chats", file=sys.stderr, flush=True)
                 return chats
+                
+            except FloodWait as fw:
+                # FloodWait - Telegram просит подождать
+                wait_time = fw.value
+                print(f"FloodWait: Telegram asks to wait {wait_time} seconds", file=sys.stderr, flush=True)
+                
+                if client:
+                    try:
+                        await client.disconnect()
+                    except:
+                        pass
+                
+                if attempt < max_retries - 1:
+                    print(f"Waiting {wait_time}s before retry...", file=sys.stderr, flush=True)
+                    await asyncio.sleep(wait_time)
+                    continue
+                else:
+                    raise Exception(f"FloodWait: Please wait {wait_time} seconds and try again")
                 
             except Exception as e:
                 error_msg = str(e)
+                print(f"Error: {error_msg}", file=sys.stderr, flush=True)
                 
                 # Закрываем клиент если открыт
                 if client:
@@ -333,10 +381,10 @@ class TelegramService:
                     except:
                         pass
                 
-                # Если "database is locked" или FloodWait - пробуем снова
-                if ("database is locked" in error_msg.lower() or "Waiting for" in error_msg) and attempt < max_retries - 1:
-                    wait_time = retry_delay * (attempt + 1)  # увеличиваем время с каждой попыткой
-                    print(f"get_chats: Database locked/busy, retry {attempt + 1}/{max_retries} in {wait_time}s...", file=sys.stderr, flush=True)
+                # Если "database is locked" - пробуем снова
+                if "database is locked" in error_msg.lower() and attempt < max_retries - 1:
+                    wait_time = retry_delay * (attempt + 1)
+                    print(f"Database locked, retry {attempt + 1}/{max_retries} in {wait_time}s...", file=sys.stderr, flush=True)
                     await asyncio.sleep(wait_time)
                     continue
                 
