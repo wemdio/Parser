@@ -269,14 +269,30 @@ class TelegramService:
     async def get_chats(self, api_id: str, api_hash: str, phone_number: str) -> List[Dict]:
         """Получает список чатов для аккаунта"""
         import sys
+        import sqlite3
         
         # Retry logic для "database is locked" ошибки
-        max_retries = 3
-        retry_delay = 2  # секунды
+        max_retries = 5
+        retry_delay = 3  # секунды
+        
+        # Попробуем включить WAL mode для сессии
+        session_path = self.get_session_path(phone_number)
+        session_file = f"{session_path}.session"
+        if os.path.exists(session_file):
+            try:
+                conn = sqlite3.connect(session_file, timeout=30)
+                conn.execute("PRAGMA journal_mode=WAL")
+                conn.close()
+            except Exception as wal_err:
+                print(f"Could not set WAL mode: {wal_err}", file=sys.stderr, flush=True)
         
         for attempt in range(max_retries):
             client = None
             try:
+                # Небольшая задержка перед попыткой (даёт время освободить файл)
+                if attempt > 0:
+                    await asyncio.sleep(1)
+                
                 # Используем существующую сессию без попытки переавторизации
                 client = await self.create_client(api_id, api_hash, phone_number, use_existing_session=True)
                 
@@ -299,6 +315,10 @@ class TelegramService:
                         })
                 
                 await client.disconnect()
+                
+                # Даём время на освобождение файла
+                await asyncio.sleep(0.5)
+                
                 return chats
                 
             except Exception as e:
@@ -309,13 +329,15 @@ class TelegramService:
                     try:
                         if client.is_connected:
                             await client.disconnect()
+                        await asyncio.sleep(0.5)
                     except:
                         pass
                 
-                # Если "database is locked" - пробуем снова
-                if "database is locked" in error_msg.lower() and attempt < max_retries - 1:
-                    print(f"get_chats: Database locked, retry {attempt + 1}/{max_retries} in {retry_delay}s...", file=sys.stderr, flush=True)
-                    await asyncio.sleep(retry_delay)
+                # Если "database is locked" или FloodWait - пробуем снова
+                if ("database is locked" in error_msg.lower() or "Waiting for" in error_msg) and attempt < max_retries - 1:
+                    wait_time = retry_delay * (attempt + 1)  # увеличиваем время с каждой попыткой
+                    print(f"get_chats: Database locked/busy, retry {attempt + 1}/{max_retries} in {wait_time}s...", file=sys.stderr, flush=True)
+                    await asyncio.sleep(wait_time)
                     continue
                 
                 raise Exception(f"Error getting chats: {error_msg}")
