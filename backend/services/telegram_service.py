@@ -461,6 +461,9 @@ class TelegramService:
                     chat_title = chat.title if hasattr(chat, 'title') else f"Chat {chat_id}"
                     chat_username = chat.username if hasattr(chat, 'username') else None
                     
+                    # Проверяем является ли чат форумом (с топиками)
+                    is_forum = getattr(chat, 'is_forum', False)
+                    
                     # Обновляем название чата в статистике
                     chat_stat["chat_name"] = chat_title
                     
@@ -471,162 +474,223 @@ class TelegramService:
                     
                     print(f"\n>>> Fetching history for chat '{chat_title}' (username: {chat_username})...", flush=True)
                     
-                    async for message in client.get_chat_history(chat_id, limit=1000):
-                        total_checked += 1
-                        
-                        # ИСПОЛЬЗУЕМ TIMESTAMP для точного определения времени
-                        # Pyrogram возвращает time в локальном часовом поясе БЕЗ TZ info
-                        # Поэтому используем timestamp (UNIX time - всегда UTC)
-                        import time as time_module
-                        
-                        original_date = message.date
-                        
-                        # Получаем timestamp (секунды с 1970-01-01 UTC)
-                        if hasattr(original_date, 'timestamp'):
-                            timestamp = original_date.timestamp()
-                        else:
-                            # Fallback для старых версий
-                            import calendar
-                            timestamp = calendar.timegm(original_date.timetuple())
-                        
-                        # Преобразуем timestamp обратно в UTC datetime
-                        msg_date = datetime.fromtimestamp(timestamp, tz=timezone.utc)
-                        
-                        # Логируем первые 5 сообщений для отладки
-                        if total_checked <= 5:
-                            print(f"    Checking message #{total_checked}:", flush=True)
-                            print(f"      Original datetime: {original_date.strftime('%Y-%m-%d %H:%M:%S')} (TZ: {original_date.tzinfo})", flush=True)
-                            print(f"      Timestamp: {timestamp}", flush=True)
-                            print(f"      UTC datetime: {msg_date.strftime('%Y-%m-%d %H:%M:%S')} UTC", flush=True)
-                            print(f"      Time limit: {time_limit.strftime('%Y-%m-%d %H:%M:%S')} UTC", flush=True)
-                        
-                        # Проверяем что сообщение в пределах времени
-                        if msg_date < time_limit:
-                            skipped_old += 1
-                            chat_stat["messages_skipped"] += 1  # 📊 Счётчик пропущенных сообщений
-                            # Логируем первое пропущенное сообщение
-                            if skipped_old == 1:
-                                print(f"    ✗ STOP: Message too old: {msg_date.strftime('%Y-%m-%d %H:%M:%S')} < {time_limit.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
-                            break  # Старые сообщения - прекращаем (история идет от новых к старым)
-                        
-                        chat_stat["messages_found"] += 1  # 📊 Счётчик найденных сообщений
-                        
-                        # Получаем информацию о пользователе
-                        user_info = {}
-                        
-                        # Логируем для отладки
-                        if total_checked <= 3:
-                            print(f"    Message #{total_checked} from_user: {message.from_user}", flush=True)
-                            if hasattr(message, 'sender_chat'):
-                                print(f"    Message #{total_checked} sender_chat: {message.sender_chat}", flush=True)
-                        
-                        if message.from_user:
-                            # Обычное сообщение от пользователя
-                            user_info = {
-                                "user_id": message.from_user.id,  # Уникальный ID - всегда доступен
-                                "first_name": message.from_user.first_name,
-                                "last_name": message.from_user.last_name,
-                                "username": message.from_user.username,  # Может быть None
-                            }
+                    if is_forum:
+                        print(f"    📁 This is a FORUM with topics!", flush=True)
+                    
+                    # Для форумов парсим все топики, для обычных чатов - обычная история
+                    message_sources = []
+                    
+                    if is_forum:
+                        # Получаем список топиков форума
+                        try:
+                            from pyrogram.raw import functions, types
                             
-                            # Пытаемся получить био пользователя
-                            try:
-                                user_full = await client.get_chat(message.from_user.id)
-                                if hasattr(user_full, 'bio') and user_full.bio:
-                                    user_info["bio"] = user_full.bio
-                                elif hasattr(user_full, 'about') and user_full.about:
-                                    user_info["bio"] = user_full.about
-                                else:
-                                    user_info["bio"] = None
-                            except FloodWait as e:
-                                # Rate limit при получении био - просто пропускаем
-                                if total_checked <= 3:
-                                    print(f"    Rate limit getting bio, skipping (wait {e.value}s)", flush=True)
-                                user_info["bio"] = None
-                            except Exception as e:
-                                if total_checked <= 3:
-                                    print(f"    Could not get bio: {e}", flush=True)
-                                user_info["bio"] = None
-                        elif hasattr(message, 'sender_chat') and message.sender_chat:
-                            # Сообщение от канала или группы
-                            user_info = {
-                                "user_id": message.sender_chat.id,
-                                "first_name": message.sender_chat.title,  # Название канала/группы
-                                "last_name": None,
-                                "username": message.sender_chat.username if hasattr(message.sender_chat, 'username') else None,
-                            }
+                            # Получаем топики через raw API
+                            result = await client.invoke(
+                                functions.channels.GetForumTopics(
+                                    channel=await client.resolve_peer(chat_id),
+                                    offset_date=0,
+                                    offset_id=0,
+                                    offset_topic=0,
+                                    limit=100
+                                )
+                            )
                             
-                            # Пытаемся получить описание канала
-                            try:
-                                chat_full = await client.get_chat(message.sender_chat.id)
-                                if hasattr(chat_full, 'description') and chat_full.description:
-                                    user_info["bio"] = chat_full.description
-                                else:
-                                    user_info["bio"] = None
-                            except FloodWait as e:
-                                # Rate limit при получении описания - просто пропускаем
-                                if total_checked <= 3:
-                                    print(f"    Rate limit getting description, skipping (wait {e.value}s)", flush=True)
-                                user_info["bio"] = None
-                            except Exception as e:
-                                if total_checked <= 3:
-                                    print(f"    Could not get channel description: {e}", flush=True)
-                                user_info["bio"] = None
-                        else:
-                            # Служебное сообщение или анонимный админ
-                            if total_checked <= 3:
-                                print(f"    ⚠️ Message #{total_checked} has no from_user or sender_chat - skipping", flush=True)
-                            continue  # Пропускаем такие сообщения
-                        
-                        message_text = ""
-                        if message.text:
-                            message_text = message.text
-                        elif message.caption:
-                            message_text = message.caption
-                        
-                        if message_text:  # Сохраняем только текстовые сообщения
-                            # Логируем время сообщения для первых нескольких
-                            if messages_in_chat < 5:
-                                print(f"    ✓ SAVING message #{messages_in_chat + 1}: {msg_date.strftime('%Y-%m-%d %H:%M:%S')} (WITHIN time limit)", flush=True)
+                            topics = []
+                            if hasattr(result, 'topics'):
+                                for topic in result.topics:
+                                    if hasattr(topic, 'id'):
+                                        topic_title = getattr(topic, 'title', f'Topic {topic.id}')
+                                        topics.append({'id': topic.id, 'title': topic_title})
                             
-                            # Создаем ссылку на профиль или сообщение
-                            profile_link = None
-                            if user_info.get("username"):
-                                # Если есть username - используем прямую ссылку на профиль
-                                profile_link = f"https://t.me/{user_info.get('username')}"
+                            print(f"    📋 Found {len(topics)} topics in forum", flush=True)
+                            
+                            # Добавляем каждый топик как источник сообщений
+                            for topic in topics:
+                                print(f"       - Topic: {topic['title']} (id: {topic['id']})", flush=True)
+                                message_sources.append({
+                                    'topic_id': topic['id'],
+                                    'topic_title': topic['title']
+                                })
+                                
+                        except Exception as forum_err:
+                            print(f"    ⚠️ Could not get forum topics: {forum_err}", flush=True)
+                            print(f"    📝 Will try to parse General topic only", flush=True)
+                            message_sources.append({'topic_id': None, 'topic_title': None})
+                    else:
+                        # Обычный чат - один источник
+                        message_sources.append({'topic_id': None, 'topic_title': None})
+                    
+                    # Парсим сообщения из всех источников (топиков или обычного чата)
+                    for source in message_sources:
+                        topic_id = source['topic_id']
+                        topic_title = source['topic_title']
+                        
+                        if topic_title:
+                            print(f"\n    >>> Parsing topic: '{topic_title}'...", flush=True)
+                        
+                        # Формируем параметры для get_chat_history
+                        history_kwargs = {'limit': 1000}
+                        if topic_id:
+                            # Для топиков используем reply_to_message_id
+                            history_kwargs['reply_to_message_id'] = topic_id
+                        
+                        async for message in client.get_chat_history(chat_id, **history_kwargs):
+                            total_checked += 1
+                            
+                            # ИСПОЛЬЗУЕМ TIMESTAMP для точного определения времени
+                            # Pyrogram возвращает time в локальном часовом поясе БЕЗ TZ info
+                            # Поэтому используем timestamp (UNIX time - всегда UTC)
+                            import time as time_module
+                            
+                            original_date = message.date
+                            
+                            # Получаем timestamp (секунды с 1970-01-01 UTC)
+                            if hasattr(original_date, 'timestamp'):
+                                timestamp = original_date.timestamp()
                             else:
-                                # Если нет username - создаём deep link на само сообщение
-                                if chat_username:
-                                    # Публичный канал/группа - ссылка на сообщение
-                                    message_link = f"https://t.me/{chat_username}/{message.id}"
-                                    profile_link = f"Профиль скрыт. Сообщение в чате \"{chat_title}\": {message_link}"
+                                # Fallback для старых версий
+                                import calendar
+                                timestamp = calendar.timegm(original_date.timetuple())
+                            
+                            # Преобразуем timestamp обратно в UTC datetime
+                            msg_date = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+                            
+                            # Логируем первые 5 сообщений для отладки
+                            if total_checked <= 5:
+                                print(f"    Checking message #{total_checked}:", flush=True)
+                                print(f"      Original datetime: {original_date.strftime('%Y-%m-%d %H:%M:%S')} (TZ: {original_date.tzinfo})", flush=True)
+                                print(f"      Timestamp: {timestamp}", flush=True)
+                                print(f"      UTC datetime: {msg_date.strftime('%Y-%m-%d %H:%M:%S')} UTC", flush=True)
+                                print(f"      Time limit: {time_limit.strftime('%Y-%m-%d %H:%M:%S')} UTC", flush=True)
+                            
+                            # Проверяем что сообщение в пределах времени
+                            if msg_date < time_limit:
+                                skipped_old += 1
+                                chat_stat["messages_skipped"] += 1  # 📊 Счётчик пропущенных сообщений
+                                # Логируем первое пропущенное сообщение
+                                if skipped_old == 1:
+                                    print(f"    ✗ STOP: Message too old: {msg_date.strftime('%Y-%m-%d %H:%M:%S')} < {time_limit.strftime('%Y-%m-%d %H:%M:%S')}", flush=True)
+                                break  # Старые сообщения - прекращаем (история идет от новых к старым)
+                            
+                            chat_stat["messages_found"] += 1  # 📊 Счётчик найденных сообщений
+                            
+                            # Получаем информацию о пользователе
+                            user_info = {}
+                            
+                            # Логируем для отладки
+                            if total_checked <= 3:
+                                print(f"    Message #{total_checked} from_user: {message.from_user}", flush=True)
+                                if hasattr(message, 'sender_chat'):
+                                    print(f"    Message #{total_checked} sender_chat: {message.sender_chat}", flush=True)
+                            
+                            if message.from_user:
+                                # Обычное сообщение от пользователя
+                                user_info = {
+                                    "user_id": message.from_user.id,  # Уникальный ID - всегда доступен
+                                    "first_name": message.from_user.first_name,
+                                    "last_name": message.from_user.last_name,
+                                    "username": message.from_user.username,  # Может быть None
+                                }
+                                
+                                # Пытаемся получить био пользователя
+                                try:
+                                    user_full = await client.get_chat(message.from_user.id)
+                                    if hasattr(user_full, 'bio') and user_full.bio:
+                                        user_info["bio"] = user_full.bio
+                                    elif hasattr(user_full, 'about') and user_full.about:
+                                        user_info["bio"] = user_full.about
+                                    else:
+                                        user_info["bio"] = None
+                                except FloodWait as e:
+                                    # Rate limit при получении био - просто пропускаем
+                                    if total_checked <= 3:
+                                        print(f"    Rate limit getting bio, skipping (wait {e.value}s)", flush=True)
+                                    user_info["bio"] = None
+                                except Exception as e:
+                                    if total_checked <= 3:
+                                        print(f"    Could not get bio: {e}", flush=True)
+                                    user_info["bio"] = None
+                            elif hasattr(message, 'sender_chat') and message.sender_chat:
+                                # Сообщение от канала или группы
+                                user_info = {
+                                    "user_id": message.sender_chat.id,
+                                    "first_name": message.sender_chat.title,  # Название канала/группы
+                                    "last_name": None,
+                                    "username": message.sender_chat.username if hasattr(message.sender_chat, 'username') else None,
+                                }
+                                
+                                # Пытаемся получить описание канала
+                                try:
+                                    chat_full = await client.get_chat(message.sender_chat.id)
+                                    if hasattr(chat_full, 'description') and chat_full.description:
+                                        user_info["bio"] = chat_full.description
+                                    else:
+                                        user_info["bio"] = None
+                                except FloodWait as e:
+                                    # Rate limit при получении описания - просто пропускаем
+                                    if total_checked <= 3:
+                                        print(f"    Rate limit getting description, skipping (wait {e.value}s)", flush=True)
+                                    user_info["bio"] = None
+                                except Exception as e:
+                                    if total_checked <= 3:
+                                        print(f"    Could not get channel description: {e}", flush=True)
+                                    user_info["bio"] = None
+                            else:
+                                # Служебное сообщение или анонимный админ
+                                if total_checked <= 3:
+                                    print(f"    ⚠️ Message #{total_checked} has no from_user or sender_chat - skipping", flush=True)
+                                continue  # Пропускаем такие сообщения
+                            
+                            message_text = ""
+                            if message.text:
+                                message_text = message.text
+                            elif message.caption:
+                                message_text = message.caption
+                            
+                            if message_text:  # Сохраняем только текстовые сообщения
+                                # Логируем время сообщения для первых нескольких
+                                if messages_in_chat < 5:
+                                    print(f"    ✓ SAVING message #{messages_in_chat + 1}: {msg_date.strftime('%Y-%m-%d %H:%M:%S')} (WITHIN time limit)", flush=True)
+                                
+                                # Создаем ссылку на профиль или сообщение
+                                profile_link = None
+                                if user_info.get("username"):
+                                    # Если есть username - используем прямую ссылку на профиль
+                                    profile_link = f"https://t.me/{user_info.get('username')}"
                                 else:
-                                    # Приватный чат - только описание
-                                    profile_link = f"Профиль скрыт. Сообщение в приватном чате \"{chat_title}\" (ID сообщения: {message.id})"
-                            
-                            # Подготавливаем данные для сохранения
-                            message_data = {
-                                "message_time": msg_date.isoformat(),  # Используем правильное UTC время
-                                "chat_name": chat_title,
-                                "user_id": user_info.get("user_id"),  # Уникальный ID пользователя
-                                "first_name": user_info.get("first_name"),
-                                "last_name": user_info.get("last_name"),
-                                "username": user_info.get("username"),  # Может быть пустым
-                                "bio": user_info.get("bio"),
-                                "profile_link": profile_link,  # Ссылка на профиль
-                                "message": message_text
-                            }
-                            
-                            # Логируем первые несколько сообщений для отладки
-                            if messages_in_chat < 3:
-                                print(f"    📦 Prepared data for saving:", flush=True)
-                                print(f"       user_id: {message_data['user_id']}", flush=True)
-                                print(f"       profile_link: {message_data['profile_link']}", flush=True)
-                                print(f"       first_name: {message_data['first_name']}", flush=True)
-                            
-                            messages_data.append(message_data)
-                            messages_in_chat += 1
-                            chat_stat["messages_saved"] += 1  # 📊 Счётчик сохранённых сообщений
+                                    # Если нет username - создаём deep link на само сообщение
+                                    if chat_username:
+                                        # Публичный канал/группа - ссылка на сообщение
+                                        message_link = f"https://t.me/{chat_username}/{message.id}"
+                                        profile_link = f"Профиль скрыт. Сообщение в чате \"{chat_title}\": {message_link}"
+                                    else:
+                                        # Приватный чат - только описание
+                                        profile_link = f"Профиль скрыт. Сообщение в приватном чате \"{chat_title}\" (ID сообщения: {message.id})"
+                                
+                                # Подготавливаем данные для сохранения
+                                message_data = {
+                                    "message_time": msg_date.isoformat(),  # Используем правильное UTC время
+                                    "chat_name": chat_title,
+                                    "user_id": user_info.get("user_id"),  # Уникальный ID пользователя
+                                    "first_name": user_info.get("first_name"),
+                                    "last_name": user_info.get("last_name"),
+                                    "username": user_info.get("username"),  # Может быть пустым
+                                    "bio": user_info.get("bio"),
+                                    "profile_link": profile_link,  # Ссылка на профиль
+                                    "message": message_text
+                                }
+                                
+                                # Логируем первые несколько сообщений для отладки
+                                if messages_in_chat < 3:
+                                    print(f"    📦 Prepared data for saving:", flush=True)
+                                    print(f"       user_id: {message_data['user_id']}", flush=True)
+                                    print(f"       profile_link: {message_data['profile_link']}", flush=True)
+                                    print(f"       first_name: {message_data['first_name']}", flush=True)
+                                
+                                messages_data.append(message_data)
+                                messages_in_chat += 1
+                                chat_stat["messages_saved"] += 1  # 📊 Счётчик сохранённых сообщений
                     
                     print(f">>> RESULT for '{chat_title}':", flush=True)
                     print(f"    - Checked: {total_checked} messages", flush=True)
