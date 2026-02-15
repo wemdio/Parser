@@ -432,9 +432,9 @@ class TelegramService:
             
             messages_data = []
             parsing_stats = []  # 📊 Статистика по каждому чату
+            user_bio_cache = {}  # 🔄 Кэш био пользователей чтобы не вызывать get_chat() повторно
             
             # Используем UTC время для сравнения
-            from datetime import timezone
             current_time = datetime.now(timezone.utc)
             time_limit = current_time - timedelta(hours=hours_back)
             
@@ -529,20 +529,21 @@ class TelegramService:
                         if topic_title:
                             print(f"\n    >>> Parsing topic: '{topic_title}'...", flush=True)
                         
-                        # Формируем параметры для get_chat_history
-                        history_kwargs = {'limit': 1000}
+                        # Выбираем правильный метод для получения сообщений
                         if topic_id:
-                            # Для топиков используем reply_to_message_id
-                            history_kwargs['reply_to_message_id'] = topic_id
+                            # Для топиков используем get_discussion_replies()
+                            # get_chat_history НЕ поддерживает reply_to_message_id в Pyrogram 2.0.106
+                            message_iterator = client.get_discussion_replies(chat_id, topic_id)
+                        else:
+                            # Для обычных чатов - стандартная история
+                            message_iterator = client.get_chat_history(chat_id, limit=1000)
                         
-                        async for message in client.get_chat_history(chat_id, **history_kwargs):
+                        async for message in message_iterator:
                             total_checked += 1
                             
                             # ИСПОЛЬЗУЕМ TIMESTAMP для точного определения времени
                             # Pyrogram возвращает time в локальном часовом поясе БЕЗ TZ info
                             # Поэтому используем timestamp (UNIX time - всегда UTC)
-                            import time as time_module
-                            
                             original_date = message.date
                             
                             # Получаем timestamp (секунды с 1970-01-01 UTC)
@@ -586,56 +587,70 @@ class TelegramService:
                             
                             if message.from_user:
                                 # Обычное сообщение от пользователя
+                                uid = message.from_user.id
                                 user_info = {
-                                    "user_id": message.from_user.id,  # Уникальный ID - всегда доступен
+                                    "user_id": uid,  # Уникальный ID - всегда доступен
                                     "first_name": message.from_user.first_name,
                                     "last_name": message.from_user.last_name,
                                     "username": message.from_user.username,  # Может быть None
                                 }
                                 
-                                # Пытаемся получить био пользователя
-                                try:
-                                    user_full = await client.get_chat(message.from_user.id)
-                                    if hasattr(user_full, 'bio') and user_full.bio:
-                                        user_info["bio"] = user_full.bio
-                                    elif hasattr(user_full, 'about') and user_full.about:
-                                        user_info["bio"] = user_full.about
-                                    else:
+                                # Пытаемся получить био пользователя (с кэшированием)
+                                if uid in user_bio_cache:
+                                    user_info["bio"] = user_bio_cache[uid]
+                                else:
+                                    try:
+                                        user_full = await client.get_chat(uid)
+                                        bio = None
+                                        if hasattr(user_full, 'bio') and user_full.bio:
+                                            bio = user_full.bio
+                                        elif hasattr(user_full, 'about') and user_full.about:
+                                            bio = user_full.about
+                                        user_bio_cache[uid] = bio
+                                        user_info["bio"] = bio
+                                    except FloodWait as e:
+                                        # Rate limit при получении био - просто пропускаем
+                                        if total_checked <= 3:
+                                            print(f"    Rate limit getting bio, skipping (wait {e.value}s)", flush=True)
+                                        user_bio_cache[uid] = None
                                         user_info["bio"] = None
-                                except FloodWait as e:
-                                    # Rate limit при получении био - просто пропускаем
-                                    if total_checked <= 3:
-                                        print(f"    Rate limit getting bio, skipping (wait {e.value}s)", flush=True)
-                                    user_info["bio"] = None
-                                except Exception as e:
-                                    if total_checked <= 3:
-                                        print(f"    Could not get bio: {e}", flush=True)
-                                    user_info["bio"] = None
+                                    except Exception as e:
+                                        if total_checked <= 3:
+                                            print(f"    Could not get bio: {e}", flush=True)
+                                        user_bio_cache[uid] = None
+                                        user_info["bio"] = None
                             elif hasattr(message, 'sender_chat') and message.sender_chat:
                                 # Сообщение от канала или группы
+                                sender_id = message.sender_chat.id
                                 user_info = {
-                                    "user_id": message.sender_chat.id,
+                                    "user_id": sender_id,
                                     "first_name": message.sender_chat.title,  # Название канала/группы
                                     "last_name": None,
                                     "username": message.sender_chat.username if hasattr(message.sender_chat, 'username') else None,
                                 }
                                 
-                                # Пытаемся получить описание канала
-                                try:
-                                    chat_full = await client.get_chat(message.sender_chat.id)
-                                    if hasattr(chat_full, 'description') and chat_full.description:
-                                        user_info["bio"] = chat_full.description
-                                    else:
+                                # Пытаемся получить описание канала (с кэшированием)
+                                if sender_id in user_bio_cache:
+                                    user_info["bio"] = user_bio_cache[sender_id]
+                                else:
+                                    try:
+                                        chat_full = await client.get_chat(sender_id)
+                                        bio = None
+                                        if hasattr(chat_full, 'description') and chat_full.description:
+                                            bio = chat_full.description
+                                        user_bio_cache[sender_id] = bio
+                                        user_info["bio"] = bio
+                                    except FloodWait as e:
+                                        # Rate limit при получении описания - просто пропускаем
+                                        if total_checked <= 3:
+                                            print(f"    Rate limit getting description, skipping (wait {e.value}s)", flush=True)
+                                        user_bio_cache[sender_id] = None
                                         user_info["bio"] = None
-                                except FloodWait as e:
-                                    # Rate limit при получении описания - просто пропускаем
-                                    if total_checked <= 3:
-                                        print(f"    Rate limit getting description, skipping (wait {e.value}s)", flush=True)
-                                    user_info["bio"] = None
-                                except Exception as e:
-                                    if total_checked <= 3:
-                                        print(f"    Could not get channel description: {e}", flush=True)
-                                    user_info["bio"] = None
+                                    except Exception as e:
+                                        if total_checked <= 3:
+                                            print(f"    Could not get channel description: {e}", flush=True)
+                                        user_bio_cache[sender_id] = None
+                                        user_info["bio"] = None
                             else:
                                 # Служебное сообщение или анонимный админ
                                 if total_checked <= 3:
@@ -704,14 +719,68 @@ class TelegramService:
                 
                 except FloodWait as e:
                     # 🔥 АВТОМАТИЧЕСКОЕ ОЖИДАНИЕ при rate limit
-                    print(f"⏳ Rate limit for chat {chat_id}: waiting {e.value} seconds...", flush=True)
-                    await asyncio.sleep(e.value)
-                    print(f"✅ Wait complete, continuing to next chat", flush=True)
+                    wait_seconds = e.value
+                    print(f"⏳ Rate limit for chat {chat_id}: waiting {wait_seconds} seconds...", flush=True)
+                    await asyncio.sleep(wait_seconds)
+                    print(f"✅ Wait complete, retrying chat {chat_id}...", flush=True)
                     
-                    # 📊 Сохраняем статистику с ошибкой
-                    chat_stat["status"] = "error"
-                    chat_stat["error_type"] = "FLOOD_WAIT"
-                    chat_stat["error_message"] = f"Rate limit: waited {e.value} seconds"
+                    # 🔄 Пробуем этот же чат ещё раз после ожидания
+                    try:
+                        retry_chat = await client.get_chat(chat_id)
+                        retry_title = retry_chat.title if hasattr(retry_chat, 'title') else f"Chat {chat_id}"
+                        
+                        async for message in client.get_chat_history(chat_id, limit=1000):
+                            total_checked += 1
+                            original_date = message.date
+                            if hasattr(original_date, 'timestamp'):
+                                timestamp = original_date.timestamp()
+                            else:
+                                import calendar
+                                timestamp = calendar.timegm(original_date.timetuple())
+                            msg_date = datetime.fromtimestamp(timestamp, tz=timezone.utc)
+                            
+                            if msg_date < time_limit:
+                                break
+                            
+                            chat_stat["messages_found"] += 1
+                            
+                            if not message.from_user and not (hasattr(message, 'sender_chat') and message.sender_chat):
+                                continue
+                            
+                            message_text = message.text or message.caption or ""
+                            if message_text:
+                                # Минимальная обработка при retry
+                                uid = message.from_user.id if message.from_user else message.sender_chat.id
+                                uname = message.from_user.username if message.from_user else getattr(message.sender_chat, 'username', None)
+                                fname = message.from_user.first_name if message.from_user else getattr(message.sender_chat, 'title', None)
+                                lname = message.from_user.last_name if message.from_user else None
+                                
+                                profile_link = f"https://t.me/{uname}" if uname else f"Профиль скрыт. Сообщение в чате \"{retry_title}\" (ID: {message.id})"
+                                
+                                messages_data.append({
+                                    "message_time": msg_date.isoformat(),
+                                    "chat_name": retry_title,
+                                    "user_id": uid,
+                                    "first_name": fname,
+                                    "last_name": lname,
+                                    "username": uname,
+                                    "bio": user_bio_cache.get(uid),
+                                    "profile_link": profile_link,
+                                    "message": message_text
+                                })
+                                messages_in_chat += 1
+                                chat_stat["messages_saved"] += 1
+                        
+                        chat_stat["status"] = "success"
+                        chat_stat["error_type"] = None
+                        chat_stat["error_message"] = f"Retried after FloodWait({wait_seconds}s)"
+                        print(f"✅ Retry successful: saved {messages_in_chat} messages from {retry_title}", flush=True)
+                    except Exception as retry_err:
+                        print(f"❌ Retry failed for chat {chat_id}: {retry_err}", flush=True)
+                        chat_stat["status"] = "error"
+                        chat_stat["error_type"] = "FLOOD_WAIT"
+                        chat_stat["error_message"] = f"Rate limit: waited {wait_seconds}s, retry failed: {retry_err}"
+                    
                     chat_stat["execution_time_seconds"] = time.time() - chat_start_time
                     chat_stat["finished_at"] = datetime.now(timezone.utc)
                     parsing_stats.append(chat_stat)

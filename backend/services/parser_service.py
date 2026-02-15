@@ -86,8 +86,11 @@ class ParserService:
                                 "message": msg["message"]
                             })
                         
-                        self.supabase_client.insert_messages_batch(formatted_messages)
-                        print(f"✅ Saved {len(messages)} messages for account {account['phone_number']}")
+                        save_success = self.supabase_client.insert_messages_batch(formatted_messages)
+                        if save_success:
+                            print(f"✅ Saved {len(messages)} messages for account {account['phone_number']}")
+                        else:
+                            print(f"⚠️ WARNING: Failed to save {len(messages)} messages for account {account['phone_number']}! Check Supabase connection.")
                     
                     # 📊 Сохраняем статистику парсинга
                     if stats:
@@ -110,8 +113,11 @@ class ParserService:
                                 "execution_time_seconds": stat.get("execution_time_seconds", 0)
                             })
                         
-                        self.supabase_client.insert_parsing_logs_batch(formatted_logs)
-                        print(f"📊 Saved statistics for {len(stats)} chats")
+                        logs_success = self.supabase_client.insert_parsing_logs_batch(formatted_logs)
+                        if logs_success:
+                            print(f"📊 Saved statistics for {len(stats)} chats")
+                        else:
+                            print(f"⚠️ WARNING: Failed to save parsing statistics for {len(stats)} chats!")
                 
                 except Exception as e:
                     print(f"Error parsing account {account.get('phone_number', 'unknown')}: {e}")

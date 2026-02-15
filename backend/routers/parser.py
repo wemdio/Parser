@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException, Request
 from backend.services.parser_service import ParserService
 from backend.database.supabase_client import SupabaseClient
+import sys
 
 router = APIRouter()
 supabase_client = SupabaseClient()
@@ -10,7 +11,6 @@ parser_service = ParserService(supabase_client)
 async def start_parsing():
     """Запускает парсинг для всех подключенных аккаунтов"""
     try:
-        import sys
         print("\n" + "="*60, file=sys.stderr, flush=True)
         print("PARSER START REQUEST RECEIVED", file=sys.stderr, flush=True)
         print("="*60 + "\n", file=sys.stderr, flush=True)
@@ -46,7 +46,6 @@ async def stop_parsing():
         print("PARSER STOP REQUEST RECEIVED", file=sys.stderr, flush=True)
         print("="*60 + "\n", file=sys.stderr, flush=True)
         
-        import sys
         stopped = parser_service.stop_parsing()
         
         if stopped:
@@ -83,7 +82,6 @@ async def get_schedule_status(request: Request):
 async def pause_schedule(request: Request):
     """Приостанавливает автоматический парсинг (отключает scheduler)"""
     try:
-        import sys
         print("\n" + "="*60, file=sys.stderr, flush=True)
         print("AUTO-PARSING PAUSE REQUEST RECEIVED", file=sys.stderr, flush=True)
         print("="*60 + "\n", file=sys.stderr, flush=True)
@@ -117,7 +115,6 @@ async def pause_schedule(request: Request):
 async def resume_schedule(request: Request):
     """Возобновляет автоматический парсинг (включает scheduler)"""
     try:
-        import sys
         print("\n" + "="*60, file=sys.stderr, flush=True)
         print("AUTO-PARSING RESUME REQUEST RECEIVED", file=sys.stderr, flush=True)
         print("="*60 + "\n", file=sys.stderr, flush=True)
