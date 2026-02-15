@@ -111,8 +111,14 @@ class SupabaseClient:
                 print(f"   first_name: {first_msg.get('first_name')}", flush=True)
                 print(f"   chat_name: {first_msg.get('chat_name')}", flush=True)
             
-            result = self.client.table('messages').insert(messages).execute()
-            print(f"Successfully inserted {len(messages)} messages!", flush=True)
+            # Используем upsert с ignore_duplicates чтобы дубликаты не убивали весь батч
+            result = self.client.table('messages').upsert(messages, ignore_duplicates=True).execute()
+            inserted_count = len(result.data) if result.data else 0
+            skipped = len(messages) - inserted_count
+            if skipped > 0:
+                print(f"Successfully inserted {inserted_count} messages ({skipped} duplicates skipped)!", flush=True)
+            else:
+                print(f"Successfully inserted {len(messages)} messages!", flush=True)
             return True
         except Exception as e:
             print(f"ERROR inserting messages batch: {e}", flush=True)
