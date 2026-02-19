@@ -267,7 +267,7 @@ class TelegramService:
             raise Exception(f"Verification error: {str(e)}")
     
     async def _get_chats_raw(self, client) -> List[Dict]:
-        """Fallback: получает группы/каналы через raw Telegram API, минуя баг pyrofork с is_bot."""
+        """Получает группы/каналы через raw Telegram API, минуя баг pyrofork с is_bot."""
         from pyrogram.raw import functions, types
         
         chats = []
@@ -276,15 +276,21 @@ class TelegramService:
         offset_peer = types.InputPeerEmpty()
         
         while True:
-            r = await client.invoke(
-                functions.messages.GetDialogs(
-                    offset_date=offset_date,
-                    offset_id=offset_id,
-                    offset_peer=offset_peer,
-                    limit=100,
-                    hash=0,
+            try:
+                r = await client.invoke(
+                    functions.messages.GetDialogs(
+                        offset_date=offset_date,
+                        offset_id=offset_id,
+                        offset_peer=offset_peer,
+                        limit=100,
+                        hash=0,
+                    )
                 )
-            )
+            except FloodWait as fw:
+                import sys
+                print(f"⏳ Raw API FloodWait: waiting {fw.value}s...", file=sys.stderr, flush=True)
+                await asyncio.sleep(fw.value + 1)
+                continue
             
             raw_chats = {c.id: c for c in getattr(r, 'chats', [])}
             
@@ -404,24 +410,9 @@ class TelegramService:
                 if not client.is_connected:
                     raise Exception("Not connected")
                 
-                print(f"Connected! Getting dialogs...", file=sys.stderr, flush=True)
+                print(f"Connected! Getting dialogs via raw API...", file=sys.stderr, flush=True)
                 
-                chats = []
-                try:
-                    async for dialog in client.get_dialogs():
-                        try:
-                            chat = dialog.chat
-                            if chat and (chat.type.value in ["group", "supergroup", "channel"]):
-                                chats.append({
-                                    "id": chat.id,
-                                    "title": chat.title,
-                                    "username": chat.username
-                                })
-                        except AttributeError:
-                            continue
-                except AttributeError as e:
-                    print(f"⚠️ get_dialogs broke, falling back to raw API: {e}", file=sys.stderr, flush=True)
-                    chats = await self._get_chats_raw(client)
+                chats = await self._get_chats_raw(client)
                 
                 print(f"Found {len(chats)} chats", file=sys.stderr, flush=True)
                 
@@ -505,25 +496,12 @@ class TelegramService:
             
             # 🔥 ЗАГРУЖАЕМ ВСЕ ЧАТЫ В КЭШ - исправляет "Peer id invalid"
             print(f"\n>>> 🔄 Loading chats into Pyrogram cache...", flush=True)
-            dialog_count = 0
             try:
-                async for dialog in client.get_dialogs(limit=500):
-                    try:
-                        _ = dialog.chat
-                        dialog_count += 1
-                    except AttributeError:
-                        continue
-                print(f">>> ✅ Loaded {dialog_count} chats into cache", flush=True)
-            except AttributeError as e:
-                print(f">>> ⚠️ get_dialogs broke, loading cache via raw API: {e}", flush=True)
-                try:
-                    raw_chats = await self._get_chats_raw(client)
-                    dialog_count = len(raw_chats)
-                    print(f">>> ✅ Loaded {dialog_count} chats via raw API fallback", flush=True)
-                except Exception as raw_e:
-                    print(f">>> ⚠️ Raw API fallback also failed: {raw_e}", flush=True)
+                raw_chats = await self._get_chats_raw(client)
+                dialog_count = len(raw_chats)
+                print(f">>> ✅ Loaded {dialog_count} chats into cache via raw API", flush=True)
             except Exception as e:
-                print(f">>> ⚠️ Warning: Could not load all dialogs: {e}", flush=True)
+                print(f">>> ⚠️ Warning: Could not load dialogs: {e}", flush=True)
             
             messages_data = []
             parsing_stats = []  # 📊 Статистика по каждому чату
