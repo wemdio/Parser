@@ -84,7 +84,13 @@ class SupabaseClient:
             raise
     
     def insert_messages_batch(self, messages: list) -> bool:
-        """Вставляет пакет сообщений"""
+        """Вставляет пакет сообщений с устойчивостью к дубликатам.
+        
+        Unique index messages_unique_hash_idx использует выражения
+        (md5(message), COALESCE(username,''), chat_name, message_time),
+        поэтому PostgREST upsert не может разрешить конфликт автоматически.
+        Вставляем чанками; при ошибке дубликата — fallback на поштучную вставку.
+        """
         if not self.client:
             print("\n" + "="*70, flush=True)
             print("❌ ERROR: Supabase client not initialized. Messages not saved!", flush=True)
@@ -99,32 +105,70 @@ class SupabaseClient:
             print("No messages to insert", flush=True)
             return True
             
-        try:
-            print(f"Inserting {len(messages)} messages to Supabase...", flush=True)
-            
-            # Логируем первые 2 сообщения для отладки
-            if len(messages) > 0:
-                print(f"\n🔍 DEBUG: First message to insert:", flush=True)
-                first_msg = messages[0]
-                print(f"   user_id: {first_msg.get('user_id')} (type: {type(first_msg.get('user_id'))})", flush=True)
-                print(f"   profile_link: {first_msg.get('profile_link')}", flush=True)
-                print(f"   first_name: {first_msg.get('first_name')}", flush=True)
-                print(f"   chat_name: {first_msg.get('chat_name')}", flush=True)
-            
-            # Используем upsert с ignore_duplicates чтобы дубликаты не убивали весь батч
-            result = self.client.table('messages').upsert(messages, ignore_duplicates=True).execute()
-            inserted_count = len(result.data) if result.data else 0
-            skipped = len(messages) - inserted_count
-            if skipped > 0:
-                print(f"Successfully inserted {inserted_count} messages ({skipped} duplicates skipped)!", flush=True)
-            else:
-                print(f"Successfully inserted {len(messages)} messages!", flush=True)
-            return True
-        except Exception as e:
-            print(f"ERROR inserting messages batch: {e}", flush=True)
-            import traceback
-            traceback.print_exc()
-            return False
+        print(f"Inserting {len(messages)} messages to Supabase...", flush=True)
+        
+        if len(messages) > 0:
+            first_msg = messages[0]
+            print(f"\n🔍 DEBUG: First message to insert:", flush=True)
+            print(f"   user_id: {first_msg.get('user_id')} (type: {type(first_msg.get('user_id'))})", flush=True)
+            print(f"   profile_link: {first_msg.get('profile_link')}", flush=True)
+            print(f"   first_name: {first_msg.get('first_name')}", flush=True)
+            print(f"   chat_name: {first_msg.get('chat_name')}", flush=True)
+
+        CHUNK_SIZE = 50
+        total_inserted = 0
+        total_duplicates = 0
+        total_errors = 0
+
+        for i in range(0, len(messages), CHUNK_SIZE):
+            chunk = messages[i:i + CHUNK_SIZE]
+            try:
+                result = self.client.table('messages').upsert(chunk, ignore_duplicates=True).execute()
+                inserted = len(result.data) if result.data else 0
+                total_inserted += inserted
+                total_duplicates += len(chunk) - inserted
+            except Exception as chunk_err:
+                err_code = getattr(chunk_err, 'code', '') or ''
+                err_msg = str(chunk_err)
+                is_duplicate = '23505' in err_msg or '23505' in str(err_code)
+
+                if is_duplicate:
+                    ins, dup, errs = self._insert_individually(chunk)
+                    total_inserted += ins
+                    total_duplicates += dup
+                    total_errors += errs
+                else:
+                    print(f"❌ Chunk insert error (non-duplicate): {chunk_err}", flush=True)
+                    total_errors += len(chunk)
+
+        if total_duplicates > 0 or total_errors > 0:
+            print(f"✅ Inserted {total_inserted}, ⏩ duplicates skipped {total_duplicates}, ❌ errors {total_errors} (total {len(messages)})", flush=True)
+        else:
+            print(f"✅ Successfully inserted all {total_inserted} messages!", flush=True)
+
+        return total_errors == 0 or total_inserted > 0
+
+    def _insert_individually(self, messages: list):
+        """Fallback: вставляет сообщения по одному, пропуская дубликаты."""
+        inserted = 0
+        duplicates = 0
+        errors = 0
+        for msg in messages:
+            try:
+                result = self.client.table('messages').upsert([msg], ignore_duplicates=True).execute()
+                if result.data:
+                    inserted += 1
+                else:
+                    duplicates += 1
+            except Exception as e:
+                err_msg = str(e)
+                if '23505' in err_msg:
+                    duplicates += 1
+                else:
+                    errors += 1
+                    if errors <= 3:
+                        print(f"⚠️ Individual insert error: {err_msg[:150]}", flush=True)
+        return inserted, duplicates, errors
     
     def insert_parsing_logs_batch(self, logs: list) -> bool:
         """Вставляет пакет логов парсинга"""
