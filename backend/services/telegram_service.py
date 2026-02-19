@@ -331,14 +331,20 @@ class TelegramService:
                 print(f"Connected! Getting dialogs...", file=sys.stderr, flush=True)
                 
                 chats = []
-                async for dialog in client.get_dialogs():
-                    chat = dialog.chat
-                    if chat and (chat.type.value in ["group", "supergroup", "channel"]):
-                        chats.append({
-                            "id": chat.id,
-                            "title": chat.title,
-                            "username": chat.username
-                        })
+                try:
+                    async for dialog in client.get_dialogs():
+                        try:
+                            chat = dialog.chat
+                            if chat and (chat.type.value in ["group", "supergroup", "channel"]):
+                                chats.append({
+                                    "id": chat.id,
+                                    "title": chat.title,
+                                    "username": chat.username
+                                })
+                        except AttributeError:
+                            continue
+                except AttributeError as e:
+                    print(f"⚠️ Partial dialog load (pyrofork issue): {e}", file=sys.stderr, flush=True)
                 
                 print(f"Found {len(chats)} chats", file=sys.stderr, flush=True)
                 
@@ -425,8 +431,14 @@ class TelegramService:
             dialog_count = 0
             try:
                 async for dialog in client.get_dialogs(limit=500):
-                    dialog_count += 1
+                    try:
+                        _ = dialog.chat
+                        dialog_count += 1
+                    except AttributeError:
+                        continue
                 print(f">>> ✅ Loaded {dialog_count} chats into cache", flush=True)
+            except AttributeError as e:
+                print(f">>> ⚠️ Partial cache load (pyrofork issue): {e}", flush=True)
             except Exception as e:
                 print(f">>> ⚠️ Warning: Could not load all dialogs: {e}", flush=True)
             
