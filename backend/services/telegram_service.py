@@ -266,6 +266,82 @@ class TelegramService:
                     pass
             raise Exception(f"Verification error: {str(e)}")
     
+    async def _get_chats_raw(self, client) -> List[Dict]:
+        """Fallback: получает группы/каналы через raw Telegram API, минуя баг pyrofork с is_bot."""
+        from pyrogram.raw import functions, types
+        
+        chats = []
+        offset_date = 0
+        offset_id = 0
+        offset_peer = types.InputPeerEmpty()
+        
+        while True:
+            r = await client.invoke(
+                functions.messages.GetDialogs(
+                    offset_date=offset_date,
+                    offset_id=offset_id,
+                    offset_peer=offset_peer,
+                    limit=100,
+                    hash=0,
+                )
+            )
+            
+            raw_chats = {c.id: c for c in getattr(r, 'chats', [])}
+            
+            for d in r.dialogs:
+                peer = d.peer
+                chat_id = None
+                if isinstance(peer, types.PeerChannel):
+                    chat_id = peer.channel_id
+                elif isinstance(peer, types.PeerChat):
+                    chat_id = peer.chat_id
+                else:
+                    continue
+                
+                raw_chat = raw_chats.get(chat_id)
+                if not raw_chat:
+                    continue
+                
+                title = getattr(raw_chat, 'title', None)
+                username = getattr(raw_chat, 'username', None)
+                
+                if isinstance(peer, types.PeerChannel):
+                    full_id = -1000000000000 - chat_id
+                else:
+                    full_id = -chat_id
+                
+                chats.append({
+                    "id": full_id,
+                    "title": title or f"Chat {chat_id}",
+                    "username": username
+                })
+            
+            if isinstance(r, types.messages.DialogsSlice):
+                if not r.dialogs:
+                    break
+                last_msg_id = r.dialogs[-1].top_message
+                for msg in r.messages:
+                    if msg.id == last_msg_id:
+                        offset_date = getattr(msg, 'date', 0)
+                        offset_id = msg.id
+                        peer = r.dialogs[-1].peer
+                        if isinstance(peer, types.PeerChannel):
+                            offset_peer = types.InputPeerChannel(
+                                channel_id=peer.channel_id,
+                                access_hash=raw_chats.get(peer.channel_id, types.InputPeerEmpty()).access_hash if raw_chats.get(peer.channel_id) else 0
+                            )
+                        elif isinstance(peer, types.PeerChat):
+                            offset_peer = types.InputPeerChat(chat_id=peer.chat_id)
+                        break
+                else:
+                    break
+            else:
+                break
+        
+        import sys
+        print(f"Raw API found {len(chats)} group/channel chats", file=sys.stderr, flush=True)
+        return chats
+
     async def get_chats(self, api_id: str, api_hash: str, phone_number: str) -> List[Dict]:
         """Получает список чатов для аккаунта"""
         import sys
@@ -344,7 +420,8 @@ class TelegramService:
                         except AttributeError:
                             continue
                 except AttributeError as e:
-                    print(f"⚠️ Partial dialog load (pyrofork issue): {e}", file=sys.stderr, flush=True)
+                    print(f"⚠️ get_dialogs broke, falling back to raw API: {e}", file=sys.stderr, flush=True)
+                    chats = await self._get_chats_raw(client)
                 
                 print(f"Found {len(chats)} chats", file=sys.stderr, flush=True)
                 
@@ -438,7 +515,13 @@ class TelegramService:
                         continue
                 print(f">>> ✅ Loaded {dialog_count} chats into cache", flush=True)
             except AttributeError as e:
-                print(f">>> ⚠️ Partial cache load (pyrofork issue): {e}", flush=True)
+                print(f">>> ⚠️ get_dialogs broke, loading cache via raw API: {e}", flush=True)
+                try:
+                    raw_chats = await self._get_chats_raw(client)
+                    dialog_count = len(raw_chats)
+                    print(f">>> ✅ Loaded {dialog_count} chats via raw API fallback", flush=True)
+                except Exception as raw_e:
+                    print(f">>> ⚠️ Raw API fallback also failed: {raw_e}", flush=True)
             except Exception as e:
                 print(f">>> ⚠️ Warning: Could not load all dialogs: {e}", flush=True)
             
