@@ -7,6 +7,50 @@ router = APIRouter()
 supabase_client = SupabaseClient()
 parser_service = ParserService(supabase_client)
 
+
+# ── Realtime endpoints ──────────────────────────────────────────────
+
+@router.get("/realtime/status")
+async def realtime_status(request: Request):
+    rt = getattr(request.app.state, 'realtime_service', None)
+    if not rt:
+        return {"running": False, "accounts": 0, "messages_received": 0}
+    return rt.status()
+
+
+@router.post("/realtime/start")
+async def realtime_start(request: Request):
+    rt = getattr(request.app.state, 'realtime_service', None)
+    if not rt:
+        raise HTTPException(status_code=500, detail="Realtime service not initialized")
+    if rt.is_running():
+        return {"status": "info", "message": "Realtime already running"}
+    try:
+        await rt.start()
+        return {"status": "success", "message": "Realtime started"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/realtime/stop")
+async def realtime_stop(request: Request):
+    rt = getattr(request.app.state, 'realtime_service', None)
+    if not rt:
+        raise HTTPException(status_code=500, detail="Realtime service not initialized")
+    if not rt.is_running():
+        return {"status": "info", "message": "Realtime is not running"}
+    await rt.stop()
+    return {"status": "success", "message": "Realtime stopped"}
+
+
+@router.post("/realtime/restart")
+async def realtime_restart(request: Request):
+    rt = getattr(request.app.state, 'realtime_service', None)
+    if not rt:
+        raise HTTPException(status_code=500, detail="Realtime service not initialized")
+    await rt.restart()
+    return {"status": "success", "message": "Realtime restarted"}
+
 @router.post("/start")
 async def start_parsing():
     """Запускает парсинг для всех подключенных аккаунтов"""
@@ -58,7 +102,7 @@ async def stop_parsing():
 
 @router.get("/schedule/status")
 async def get_schedule_status(request: Request):
-    """Получает статус автоматического парсинга"""
+    """Получает статус автоматического парсинга и realtime"""
     try:
         auto_parsing_enabled = getattr(request.app.state, 'auto_parsing_enabled', True)
         scheduler = getattr(request.app.state, 'scheduler', None)
@@ -69,9 +113,13 @@ async def get_schedule_status(request: Request):
         else:
             next_run = None
         
+        rt = getattr(request.app.state, 'realtime_service', None)
+        rt_status = rt.status() if rt else {"running": False}
+        
         return {
             "auto_parsing_enabled": auto_parsing_enabled,
             "next_run": next_run,
+            "realtime": rt_status,
             "message": "Auto-parsing is enabled" if auto_parsing_enabled else "Auto-parsing is disabled"
         }
     except Exception as e:

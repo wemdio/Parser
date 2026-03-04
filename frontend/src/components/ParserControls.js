@@ -9,12 +9,11 @@ function ParserControls() {
   const [isRunning, setIsRunning] = useState(false);
   const [autoParsingEnabled, setAutoParsingEnabled] = useState(true);
   const [nextRun, setNextRun] = useState(null);
+  const [realtime, setRealtime] = useState({ running: false, accounts: 0, messages_received: 0 });
 
-  // Проверяем статус парсера и автопарсинга при загрузке
   useEffect(() => {
     checkParserStatus();
     checkScheduleStatus();
-    // Обновляем статус каждые 5 секунд
     const interval = setInterval(() => {
       checkParserStatus();
       checkScheduleStatus();
@@ -36,8 +35,44 @@ function ParserControls() {
       const response = await axios.get(`${API_BASE}/parser/schedule/status`);
       setAutoParsingEnabled(response.data.auto_parsing_enabled);
       setNextRun(response.data.next_run);
+      if (response.data.realtime) {
+        setRealtime(response.data.realtime);
+      }
     } catch (error) {
       console.error('Error checking schedule status:', error);
+    }
+  };
+
+  const handleRealtimeToggle = async () => {
+    setLoading(true);
+    setMessage(null);
+    try {
+      if (realtime.running) {
+        await axios.post(`${API_BASE}/parser/realtime/stop`);
+        setMessage({ type: 'warning', text: 'Real-time режим остановлен.' });
+      } else {
+        await axios.post(`${API_BASE}/parser/realtime/start`);
+        setMessage({ type: 'success', text: 'Real-time режим запущен! Сообщения будут приходить мгновенно.' });
+      }
+      await checkScheduleStatus();
+    } catch (error) {
+      setMessage({ type: 'error', text: error.response?.data?.detail || 'Ошибка управления real-time' });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRealtimeRestart = async () => {
+    setLoading(true);
+    setMessage(null);
+    try {
+      await axios.post(`${API_BASE}/parser/realtime/restart`);
+      setMessage({ type: 'success', text: 'Real-time перезапущен. Чаты обновлены.' });
+      await checkScheduleStatus();
+    } catch (error) {
+      setMessage({ type: 'error', text: error.response?.data?.detail || 'Ошибка перезапуска' });
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -152,9 +187,48 @@ function ParserControls() {
         </div>
       )}
 
-      {/* Блок автоматического парсинга */}
+      {/* Блок Real-time */}
       <div className="auto-parsing-section">
-        <h3>⏰ Автоматический парсинг (каждый час)</h3>
+        <h3>⚡ Real-time режим</h3>
+        <div className="auto-parsing-status">
+          <div className={`status-badge ${realtime.running ? 'status-active' : 'status-paused'}`}>
+            {realtime.running ? '⚡ Активен' : '⏸️ Выключен'}
+          </div>
+          {realtime.running && (
+            <div className="next-run-info">
+              Аккаунтов: <strong>{realtime.accounts}</strong> &nbsp;|&nbsp; 
+              Получено сообщений: <strong>{realtime.messages_received}</strong>
+              {realtime.queue_size > 0 && (
+                <> &nbsp;|&nbsp; В очереди: <strong>{realtime.queue_size}</strong></>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="parser-buttons">
+          <button 
+            className={`btn ${realtime.running ? 'btn-warning' : 'btn-success'}`}
+            onClick={handleRealtimeToggle}
+            disabled={loading}
+          >
+            {loading ? '...' : realtime.running ? '⏸️ Остановить real-time' : '⚡ Запустить real-time'}
+          </button>
+          {realtime.running && (
+            <button 
+              className="btn btn-primary"
+              onClick={handleRealtimeRestart}
+              disabled={loading}
+            >
+              {loading ? '...' : '🔄 Перезапустить (обновить чаты)'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      <hr />
+
+      {/* Блок автоматического парсинга (fallback) */}
+      <div className="auto-parsing-section">
+        <h3>⏰ Batch-парсинг (страховка, каждые 30 мин)</h3>
         <div className="auto-parsing-status">
           <div className={`status-badge ${autoParsingEnabled ? 'status-active' : 'status-paused'}`}>
             {autoParsingEnabled ? '✅ Включен' : '⏸️ Выключен'}
@@ -172,7 +246,7 @@ function ParserControls() {
               onClick={handlePauseSchedule}
               disabled={loading}
             >
-              {loading ? 'Отключение...' : '⏸️ Выключить авто-парсинг'}
+              {loading ? 'Отключение...' : '⏸️ Выключить batch-парсинг'}
             </button>
           ) : (
             <button 
@@ -180,7 +254,7 @@ function ParserControls() {
               onClick={handleResumeSchedule}
               disabled={loading}
             >
-              {loading ? 'Включение...' : '▶️ Включить авто-парсинг'}
+              {loading ? 'Включение...' : '▶️ Включить batch-парсинг'}
             </button>
           )}
         </div>
@@ -196,9 +270,9 @@ function ParserControls() {
             <strong>Как это работает:</strong>
           </p>
           <ul>
-            <li>Парсер собирает сообщения за последний час из выбранных чатов</li>
-            <li>Все сообщения сохраняются в базу данных Supabase</li>
-            <li>Сохраняются: время, название чата, имя и фамилия, username, био, текст сообщения</li>
+            <li><strong>Real-time:</strong> сообщения приходят мгновенно (задержка &lt; 3 сек)</li>
+            <li><strong>Batch-парсинг:</strong> страховка каждые 30 мин, подбирает пропущенное</li>
+            <li><strong>Ручной запуск:</strong> собирает сообщения за последний час прямо сейчас</li>
           </ul>
         </div>
 

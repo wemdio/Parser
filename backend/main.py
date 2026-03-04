@@ -28,6 +28,7 @@ if os.getenv('SUPABASE_URL'):
 
 from backend.routers import accounts, chats, parser, stats
 from backend.services.parser_service import ParserService
+from backend.services.realtime_service import RealtimeService
 from backend.database.supabase_client import SupabaseClient
 
 # Инициализация Supabase
@@ -47,31 +48,39 @@ async def lifespan(app: FastAPI):
     print(">>> LOGS WILL APPEAR BELOW", flush=True)
     print("="*70 + "\n", flush=True)
     
-    # Инициализация сервиса парсинга
+    # Инициализация сервисов
     parser_service = ParserService(supabase_client)
+    realtime_service = RealtimeService(supabase_client)
     
-    # Сохраняем scheduler и статус в app.state для доступа из роутеров
+    # Сохраняем в app.state для доступа из роутеров
     app.state.scheduler = scheduler
-    app.state.auto_parsing_enabled = True  # По умолчанию включен
+    app.state.auto_parsing_enabled = True
+    app.state.realtime_service = realtime_service
     
-    # Запуск планировщика при старте
+    # Запуск планировщика (batch-парсинг как fallback каждые 30 мин)
     scheduler.start()
-    
-    # Добавляем задачу на каждый час
     scheduler.add_job(
         parser_service.parse_all_accounts,
         'interval',
-        hours=1,
+        minutes=30,
         id='hourly_parse',
         replace_existing=True
     )
+    print("✅ Scheduler started — batch fallback every 30 min", flush=True)
     
-    print("✅ Scheduler started - auto-parsing enabled (every hour)\n", flush=True)
+    # Запуск real-time сервиса
+    try:
+        await realtime_service.start()
+        print("✅ Realtime service started — messages arrive instantly\n", flush=True)
+    except Exception as e:
+        print(f"⚠️ Realtime service failed to start: {e}", flush=True)
+        print("   Batch parsing will still work as fallback\n", flush=True)
     
     yield
     
-    # Остановка планировщика при завершении
+    # Остановка при завершении
     print("\nShutting down backend...", flush=True)
+    await realtime_service.stop()
     scheduler.shutdown()
 
 app = FastAPI(lifespan=lifespan)
