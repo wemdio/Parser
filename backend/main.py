@@ -64,7 +64,10 @@ async def lifespan(app: FastAPI):
         'interval',
         minutes=30,
         id='hourly_parse',
-        replace_existing=True
+        replace_existing=True,
+        max_instances=1,
+        coalesce=True,
+        misfire_grace_time=300
     )
     print("✅ Scheduler started — batch fallback every 30 min", flush=True)
     

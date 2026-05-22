@@ -35,7 +35,8 @@ class TelegramService:
                 client = Client(
                     session_path,
                     api_id=int(api_id),
-                    api_hash=api_hash
+                    api_hash=api_hash,
+                    sleep_threshold=5
                 )
             else:
                 # Для новой авторизации - передаём phone_number
@@ -43,7 +44,8 @@ class TelegramService:
                     session_path,
                     api_id=int(api_id),
                     api_hash=api_hash,
-                    phone_number=phone_number
+                    phone_number=phone_number,
+                    sleep_threshold=5
                 )
             return client
         except Exception as e:

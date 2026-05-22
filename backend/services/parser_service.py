@@ -1,9 +1,14 @@
+import asyncio
 from typing import List
 from backend.services.telegram_service import TelegramService
 from backend.database.account_storage import AccountStorage
 from backend.database.supabase_client import SupabaseClient
 import uuid
 from datetime import datetime, timezone
+
+# Hard cap per account scan. If pyrofork hangs in FloodWait or any other reason,
+# abort that account so the scheduler can start the next hourly run cleanly.
+PARSE_ACCOUNT_TIMEOUT_SECONDS = 900  # 15 minutes
 
 class ParserService:
     def __init__(self, supabase_client: SupabaseClient):
@@ -49,15 +54,26 @@ class ParserService:
                         continue
                     
                     print(f">>> Parsing messages from {len(selected_chats)} chats...", flush=True)
-                    
+
                     # 📊 Парсим сообщения (теперь возвращает Dict с messages и stats)
-                    result = await self.telegram_service.parse_messages(
-                        account["api_id"],
-                        account["api_hash"],
-                        account["phone_number"],
-                        selected_chats,
-                        hours_back=1
-                    )
+                    try:
+                        result = await asyncio.wait_for(
+                            self.telegram_service.parse_messages(
+                                account["api_id"],
+                                account["api_hash"],
+                                account["phone_number"],
+                                selected_chats,
+                                hours_back=1
+                            ),
+                            timeout=PARSE_ACCOUNT_TIMEOUT_SECONDS
+                        )
+                    except asyncio.TimeoutError:
+                        print(
+                            f"⏱️ Account {account['phone_number']} exceeded "
+                            f"{PARSE_ACCOUNT_TIMEOUT_SECONDS}s — aborted, will retry next cycle",
+                            flush=True
+                        )
+                        continue
                     
                     messages = result.get("messages", [])
                     stats = result.get("stats", [])
