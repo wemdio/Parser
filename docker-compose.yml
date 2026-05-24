@@ -12,6 +12,13 @@ services:
       - ./sessions:/app/sessions
       - ./accounts.json:/app/accounts.json
     restart: unless-stopped
+    # Cap container log size so verbose pyrofork/print output cannot
+    # fill the host disk again (was 100% on Timeweb after weeks of runs).
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "3"
 
   frontend:
     build:

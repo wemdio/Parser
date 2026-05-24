@@ -33,6 +33,14 @@ sessions/*.session-journal
 .env.local
 .env.test
 
-# Note: frontend/ is NOT excluded here because it's needed for frontend builds
-# The backend Dockerfile uses its own .dockerignore to exclude frontend/
+# Frontend is built from its own context (./frontend in docker-compose.yml),
+# so excluding it here only strips it from the backend image — which was
+# baking in ~444MB of frontend source for no reason and filling host disk
+# across redeploys.
+frontend/
+
+# Node modules (any stray copies)
+node_modules/
+package.json
+package-lock.json
 
