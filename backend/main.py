@@ -51,7 +51,12 @@ async def lifespan(app: FastAPI):
     # Инициализация сервисов
     parser_service = ParserService(supabase_client)
     realtime_service = RealtimeService(supabase_client)
-    
+
+    # Wire realtime into parser so the scheduled batch can revive realtime
+    # if it failed to start at boot (typical when no accounts were connected
+    # yet at lifespan startup).
+    parser_service.set_realtime_service(realtime_service)
+
     # Сохраняем в app.state для доступа из роутеров
     app.state.scheduler = scheduler
     app.state.auto_parsing_enabled = True

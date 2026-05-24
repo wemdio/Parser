@@ -6,9 +6,10 @@ from backend.database.supabase_client import SupabaseClient
 import uuid
 from datetime import datetime, timezone
 
-# Hard cap per account scan. If pyrofork hangs in FloodWait or any other reason,
-# abort that account so the scheduler can start the next hourly run cleanly.
-PARSE_ACCOUNT_TIMEOUT_SECONDS = 900  # 15 minutes
+# Hard cap per account scan. Defense-in-depth on top of the per-chat timeout
+# in telegram_service.parse_messages — if every single chat hits its 25s
+# timeout, 93 chats × 25s ≈ 39 min, so a generous outer cap is needed.
+PARSE_ACCOUNT_TIMEOUT_SECONDS = 1800  # 30 minutes
 
 class ParserService:
     def __init__(self, supabase_client: SupabaseClient):
@@ -17,6 +18,16 @@ class ParserService:
         self.supabase_client = supabase_client
         self._is_running = False
         self._should_stop = False
+        # Optional realtime service. Wired from main.py after construction
+        # so the batch scheduler can recover the realtime listener when
+        # accounts appear after the initial RealtimeService.start() call
+        # (which silently exits if no accounts are connected yet).
+        self._realtime_service = None
+
+    def set_realtime_service(self, realtime_service):
+        """Inject the RealtimeService so parse_all_accounts can revive it
+        if accounts appeared after startup."""
+        self._realtime_service = realtime_service
     
     async def parse_all_accounts(self):
         """Парсит сообщения для всех подключенных аккаунтов"""
@@ -33,10 +44,20 @@ class ParserService:
         try:
             accounts = self.account_storage.get_all_connected_accounts()
             print(f">>> Found {len(accounts)} connected accounts", flush=True)
-            
+
             if not accounts:
                 print(">>> WARNING: No connected accounts found!", flush=True)
                 return
+
+            # If realtime wasn't able to start at boot (no accounts at the time)
+            # but accounts exist now, try to bring it up so we don't depend on
+            # the slow 30-min batch scan as the only data source.
+            if self._realtime_service is not None and not self._realtime_service.is_running():
+                print(">>> Realtime is not running but accounts exist — starting it", flush=True)
+                try:
+                    await self._realtime_service.start()
+                except Exception as rt_err:
+                    print(f">>> ⚠️ Could not start realtime: {rt_err}", flush=True)
             
             for account in accounts:
                 # Проверяем флаг остановки

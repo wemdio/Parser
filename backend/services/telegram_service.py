@@ -5,6 +5,12 @@ import os
 from typing import Optional, Dict, List
 import json
 
+# Hard cap per single chat. pyrofork's internal FloodWait handler silently sleeps
+# 20+ seconds per channels.GetMessages, so without an outer cancel one stuck
+# chat can eat the entire account budget. asyncio.wait_for around __anext__
+# cancels that sleep and lets us move to the next chat.
+PER_CHAT_TIMEOUT_SECONDS = 25
+
 class TelegramService:
     def __init__(self):
         self.sessions_dir = "sessions"
@@ -612,8 +618,35 @@ class TelegramService:
                         else:
                             # Для обычных чатов - стандартная история
                             message_iterator = client.get_chat_history(chat_id, limit=1000)
-                        
-                        async for message in message_iterator:
+
+                        # Manual iteration so we can wrap __anext__ in wait_for.
+                        # Plain `async for` cannot be cancelled while pyrofork is
+                        # silently sleeping on a FloodWait inside the iterator.
+                        chat_timed_out = False
+                        message_iter = message_iterator.__aiter__()
+                        while True:
+                            try:
+                                message = await asyncio.wait_for(
+                                    message_iter.__anext__(),
+                                    timeout=PER_CHAT_TIMEOUT_SECONDS
+                                )
+                            except StopAsyncIteration:
+                                break
+                            except asyncio.TimeoutError:
+                                print(
+                                    f"    ⏱️ Chat '{chat_title}' stuck > {PER_CHAT_TIMEOUT_SECONDS}s "
+                                    f"(likely FloodWait inside pyrofork) — skipping",
+                                    flush=True
+                                )
+                                chat_stat["status"] = "timeout"
+                                chat_stat["error_type"] = "PER_CHAT_TIMEOUT"
+                                chat_stat["error_message"] = (
+                                    f"Stuck > {PER_CHAT_TIMEOUT_SECONDS}s waiting for next message "
+                                    f"(pyrofork internal FloodWait sleep)"
+                                )
+                                chat_timed_out = True
+                                break
+
                             total_checked += 1
                             
                             # ИСПОЛЬЗУЕМ TIMESTAMP для точного определения времени
@@ -781,7 +814,12 @@ class TelegramService:
                                 messages_data.append(message_data)
                                 messages_in_chat += 1
                                 chat_stat["messages_saved"] += 1  # 📊 Счётчик сохранённых сообщений
-                    
+
+                        # If the inner timeout fired, stop trying further topics
+                        # for this chat — same session, same FloodWait will hit again.
+                        if chat_timed_out:
+                            break
+
                     print(f">>> RESULT for '{chat_title}':", flush=True)
                     print(f"    - Checked: {total_checked} messages", flush=True)
                     print(f"    - Saved: {messages_in_chat} messages (within last hour)", flush=True)
