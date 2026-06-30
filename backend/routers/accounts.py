@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from backend.services.telegram_service import TelegramService
 from backend.database.account_storage import AccountStorage
+from backend.database import state_persistence
 import os
 import shutil
 
@@ -217,6 +218,8 @@ async def verify_code(request: VerifyCodeRequest):
         
         if success:
             account_storage.update_account_connection(request.account_id, True)
+            # Persist the freshly created session to Supabase so it survives rebuilds.
+            state_persistence.backup_session(account["phone_number"])
             return {"status": "success", "message": "Account connected successfully"}
         else:
             raise HTTPException(status_code=400, detail="Verification failed")
@@ -387,7 +390,10 @@ async def upload_session(
                 # Сразу помечаем как подключенный
                 account_storage.update_account_connection(account_id, True)
                 print(f"Created new account {account_id}", file=sys.stderr, flush=True)
-            
+
+            # Persist the uploaded session to Supabase so it survives rebuilds.
+            state_persistence.backup_session(phone)
+
             return {
                 "status": "success",
                 "account_id": account_id,
@@ -509,6 +515,8 @@ async def check_account_status(account_id: int):
             
             print(f"check-status: Session valid for {phone} - {me.first_name}", file=sys.stderr, flush=True)
             account_storage.update_account_connection(account_id, True)
+            # Session re-validated and stopped — capture any refresh to Supabase.
+            state_persistence.backup_session(phone)
             return {"is_connected": True, "status": "connected", "user": me.first_name}
             
         except Exception as e:

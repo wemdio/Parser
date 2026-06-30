@@ -47,7 +47,16 @@ async def lifespan(app: FastAPI):
     print(">>> Listening on http://localhost:8000", flush=True)
     print(">>> LOGS WILL APPEAR BELOW", flush=True)
     print("="*70 + "\n", flush=True)
-    
+
+    # Restore accounts.json + session files from Supabase BEFORE anything reads
+    # them. Timeweb Apps wipe these on every rebuild; this makes the account +
+    # session survive redeploys so the parser reconnects automatically.
+    try:
+        from backend.database import state_persistence
+        state_persistence.restore_all()
+    except Exception as e:
+        print(f"⚠️ State restore failed (continuing): {e}", flush=True)
+
     # Инициализация сервисов
     parser_service = ParserService(supabase_client)
     realtime_service = RealtimeService(supabase_client)
@@ -89,6 +98,12 @@ async def lifespan(app: FastAPI):
     # Остановка при завершении
     print("\nShutting down backend...", flush=True)
     await realtime_service.stop()
+    # Clients are stopped now, so session files are consistent — back them up.
+    try:
+        from backend.database import state_persistence
+        state_persistence.backup_all()
+    except Exception as e:
+        print(f"⚠️ State backup on shutdown failed: {e}", flush=True)
     scheduler.shutdown()
 
 app = FastAPI(lifespan=lifespan)

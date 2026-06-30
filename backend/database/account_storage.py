@@ -26,6 +26,14 @@ class AccountStorage:
         """Записывает данные в файл"""
         with open(self.storage_file, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+        # Mirror to Supabase so the account list + selected chats survive
+        # container rebuilds (Timeweb Apps have no persistent disk).
+        # Best-effort: never let a persistence hiccup break account storage.
+        try:
+            from backend.database import state_persistence
+            state_persistence.backup_accounts()
+        except Exception:
+            pass
     
     def add_account(self, account_data: dict) -> int:
         """Добавляет аккаунт и возвращает его ID"""
