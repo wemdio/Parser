@@ -1,5 +1,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from contextlib import asynccontextmanager
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import asyncio
@@ -123,14 +125,6 @@ app.include_router(chats.router, prefix="/api/chats", tags=["chats"])
 app.include_router(parser.router, prefix="/api/parser", tags=["parser"])
 app.include_router(stats.router, prefix="/api/stats", tags=["stats"])
 
-@app.get("/")
-async def root():
-    return {
-        "message": "Telegram Parser API",
-        "version": "2.0-with-logging",
-        "status": "Backend is running with enhanced logging"
-    }
-
 @app.get("/health")
 async def health():
     return {
@@ -138,6 +132,47 @@ async def health():
         "version": "2.0-with-logging",
         "logging": "enabled"
     }
+
+# ── Serve the built React frontend (merged single-app deploy) ─────────────
+# Dockerfile.fullstack builds frontend/ and copies the result to ./frontend_build.
+# Static assets are served from /static; any other path falls back to index.html
+# so React Router client-side routes resolve. /api/* and /health are matched by
+# their own routes above (registered before this catch-all).
+FRONTEND_DIR = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend_build"
+)
+_FRONTEND_INDEX = os.path.join(FRONTEND_DIR, "index.html")
+
+if os.path.isdir(FRONTEND_DIR):
+    _static_dir = os.path.join(FRONTEND_DIR, "static")
+    if os.path.isdir(_static_dir):
+        app.mount("/static", StaticFiles(directory=_static_dir), name="static")
+
+    @app.get("/")
+    async def serve_index():
+        return FileResponse(_FRONTEND_INDEX)
+
+    @app.get("/{full_path:path}")
+    async def spa_fallback(full_path: str):
+        # If an /api or /health path reaches here it didn't match a real route → 404.
+        if full_path.startswith("api/") or full_path == "health":
+            raise HTTPException(status_code=404, detail="Not found")
+        # Serve real root-level files (favicon.ico, manifest.json, ...),
+        # guarding against path traversal.
+        candidate = os.path.normpath(os.path.join(FRONTEND_DIR, full_path))
+        if (candidate == FRONTEND_DIR or candidate.startswith(FRONTEND_DIR + os.sep)) \
+                and os.path.isfile(candidate):
+            return FileResponse(candidate)
+        # Otherwise hand back the SPA entry point.
+        return FileResponse(_FRONTEND_INDEX)
+else:
+    @app.get("/")
+    async def root():
+        return {
+            "message": "Telegram Parser API",
+            "version": "2.0-with-logging",
+            "status": "Backend is running (frontend not bundled)",
+        }
 
 if __name__ == "__main__":
     import uvicorn

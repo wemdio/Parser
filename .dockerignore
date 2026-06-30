@@ -33,14 +33,14 @@ sessions/*.session-journal
 .env.local
 .env.test
 
-# Frontend is built from its own context (./frontend in docker-compose.yml),
-# so excluding it here only strips it from the backend image — which was
-# baking in ~444MB of frontend source for no reason and filling host disk
-# across redeploys.
-frontend/
+# Frontend: keep the SOURCE in the context so Dockerfile.fullstack stage 1 can
+# build it (only ~778K), but never ship node_modules / prior build output.
+frontend/node_modules/
+frontend/build/
 
-# Node modules (any stray copies)
+# Node modules (any stray copies). Root package files only — keep
+# frontend/package*.json so Dockerfile.fullstack stage 1 can `npm ci`.
 node_modules/
-package.json
-package-lock.json
+/package.json
+/package-lock.json
 
