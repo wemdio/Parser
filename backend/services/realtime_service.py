@@ -9,6 +9,21 @@ import os
 import sys
 
 
+def _timeout_from_env(name: str, default: float) -> float:
+    try:
+        return max(0.1, float(os.getenv(name, str(default))))
+    except (TypeError, ValueError):
+        return default
+
+
+CLIENT_START_TIMEOUT_SECONDS = _timeout_from_env(
+    "REALTIME_CLIENT_START_TIMEOUT_SECONDS", 30.0
+)
+CLIENT_STOP_TIMEOUT_SECONDS = _timeout_from_env(
+    "REALTIME_CLIENT_STOP_TIMEOUT_SECONDS", 10.0
+)
+
+
 class RealtimeService:
     """Persistent Telegram clients that receive messages in real-time via event handlers."""
 
@@ -28,6 +43,7 @@ class RealtimeService:
 
         self._save_queue: list[dict] = []
         self._flush_task: asyncio.Task | None = None
+        self._lifecycle_lock = asyncio.Lock()
 
     # ── public status ────────────────────────────────────────────────
 
@@ -47,58 +63,65 @@ class RealtimeService:
     # ── lifecycle ────────────────────────────────────────────────────
 
     async def start(self):
-        if self._running:
-            return
+        async with self._lifecycle_lock:
+            if self._running:
+                return
 
-        print("\n" + "=" * 60, flush=True)
-        print(">>> REALTIME SERVICE STARTING <<<", flush=True)
-        print("=" * 60, flush=True)
+            print("\n" + "=" * 60, flush=True)
+            print(">>> REALTIME SERVICE STARTING <<<", flush=True)
+            print("=" * 60, flush=True)
 
-        accounts = self.account_storage.get_all_connected_accounts()
-        if not accounts:
-            print(">>> No connected accounts, realtime not started", flush=True)
-            return
+            accounts = self.account_storage.get_all_connected_accounts()
+            if not accounts:
+                print(">>> No connected accounts, realtime not started", flush=True)
+                return
 
-        self._running = True
-        self._started_at = datetime.now(timezone.utc)
-        self._flush_task = asyncio.create_task(self._flush_loop())
+            self._running = True
+            self._started_at = datetime.now(timezone.utc)
+            self._flush_task = asyncio.create_task(self._flush_loop())
 
-        for account in accounts:
-            try:
-                await self._start_client(account)
-            except Exception as e:
-                err = f"Failed to start client {account.get('phone_number')}: {e}"
-                print(f">>> {err}", flush=True)
-                self._errors.append(err)
+            await asyncio.gather(
+                *(self._start_client_with_timeout(account) for account in accounts)
+            )
 
-        total = len(self._clients)
-        print(f">>> REALTIME SERVICE STARTED — {total} client(s) connected", flush=True)
+            total = len(self._clients)
+            if total == 0:
+                self._running = False
+                self._started_at = None
+                await self._cancel_flush_task()
+                print(
+                    ">>> REALTIME SERVICE NOT STARTED — all clients failed; "
+                    "the scheduler can retry",
+                    flush=True,
+                )
+                return
+
+            print(
+                f">>> REALTIME SERVICE STARTED — {total} client(s) connected",
+                flush=True,
+            )
 
     async def stop(self):
-        if not self._running:
-            return
+        async with self._lifecycle_lock:
+            if not self._running and not self._clients and not self._flush_task:
+                return
 
-        print("\n>>> REALTIME SERVICE STOPPING...", flush=True)
-        self._running = False
+            print("\n>>> REALTIME SERVICE STOPPING...", flush=True)
+            self._running = False
 
-        if self._flush_task:
-            self._flush_task.cancel()
-            try:
-                await self._flush_task
-            except asyncio.CancelledError:
-                pass
+            await self._cancel_flush_task()
+            await self._flush_queue()
 
-        await self._flush_queue()
+            await asyncio.gather(
+                *(
+                    self._stop_client_with_timeout(phone, client)
+                    for phone, client in list(self._clients.items())
+                )
+            )
 
-        for phone, client in list(self._clients.items()):
-            try:
-                await client.stop()
-                print(f">>> Disconnected {phone}", flush=True)
-            except Exception as e:
-                print(f">>> Error disconnecting {phone}: {e}", flush=True)
-
-        self._clients.clear()
-        print(">>> REALTIME SERVICE STOPPED", flush=True)
+            self._clients.clear()
+            self._started_at = None
+            print(">>> REALTIME SERVICE STOPPED", flush=True)
 
     async def restart(self):
         await self.stop()
@@ -106,6 +129,60 @@ class RealtimeService:
         await self.start()
 
     # ── client management ────────────────────────────────────────────
+
+    async def _start_client_with_timeout(self, account: dict):
+        phone = account.get("phone_number", "unknown")
+        try:
+            await asyncio.wait_for(
+                self._start_client(account),
+                timeout=CLIENT_START_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            err = (
+                f"Failed to start client {phone}: timed out after "
+                f"{CLIENT_START_TIMEOUT_SECONDS:g}s"
+            )
+            print(f">>> {err}", flush=True)
+            self._errors.append(err)
+        except Exception as e:
+            err = f"Failed to start client {phone}: {e}"
+            print(f">>> {err}", flush=True)
+            self._errors.append(err)
+
+    async def _stop_client_with_timeout(self, phone: str, client: Client):
+        try:
+            await asyncio.wait_for(
+                client.stop(),
+                timeout=CLIENT_STOP_TIMEOUT_SECONDS,
+            )
+            print(f">>> Disconnected {phone}", flush=True)
+        except asyncio.TimeoutError:
+            err = (
+                f"Failed to stop client {phone}: timed out after "
+                f"{CLIENT_STOP_TIMEOUT_SECONDS:g}s"
+            )
+            print(f">>> {err}", flush=True)
+            self._errors.append(err)
+        except Exception as e:
+            err = f"Error disconnecting {phone}: {e}"
+            print(f">>> {err}", flush=True)
+            self._errors.append(err)
+
+    async def _cancel_flush_task(self):
+        task = self._flush_task
+        self._flush_task = None
+        if not task:
+            return
+
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            err = f"Flush task shutdown error: {e}"
+            print(f">>> RT: {err}", file=sys.stderr, flush=True)
+            self._errors.append(err)
 
     async def _start_client(self, account: dict):
         phone = account["phone_number"]
@@ -137,7 +214,18 @@ class RealtimeService:
 
         client.add_handler(MessageHandler(on_message, chat_filter))
 
-        await client.start()
+        try:
+            await client.start()
+        except BaseException:
+            try:
+                await asyncio.wait_for(
+                    client.stop(),
+                    timeout=CLIENT_STOP_TIMEOUT_SECONDS,
+                )
+            except BaseException:
+                pass
+            raise
+
         self._clients[phone] = client
 
         chat_count = len(selected_chats)
