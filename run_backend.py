@@ -11,9 +11,20 @@ if sys.platform == "win32":
     sys.stdout = codecs.getwriter("utf-8")(sys.stdout.detach())
     sys.stderr = codecs.getwriter("utf-8")(sys.stderr.detach())
 
-import uvicorn
-
 if __name__ == "__main__":
+    if "--serve" not in sys.argv:
+        from backend.process_supervisor import supervise
+        supervise(__file__)
+        sys.exit(0)
+
+    import faulthandler
+    import signal
+    import uvicorn
+
+    faulthandler.enable()
+    if hasattr(signal, "SIGUSR1"):
+        faulthandler.register(signal.SIGUSR1, all_threads=True)
+
     print("\n" + "="*70)
     print("STARTING BACKEND - Version 2.1")
     print("="*70 + "\n")
