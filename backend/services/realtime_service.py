@@ -270,7 +270,7 @@ class RealtimeService:
                 self._next_join_at = time.monotonic() + 10
                 try:
                     chat = await client.get_chat(username)
-                    if chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP) or not chat.username:
+                    if chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP, ChatType.FORUM) or not chat.username:
                         raise ValueError("Public group required")
                     existing_owner = self.account_storage.selected_chat_owner(chat.id)
                     if existing_owner is not None and existing_owner != account_id:

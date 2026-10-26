@@ -208,6 +208,25 @@ class OnboardingServiceTests(unittest.IsolatedAsyncioTestCase):
                 await self.service.join_selected_chat(3, "ozon_fbs")
         self.client.join_chat.assert_not_awaited()
 
+    async def test_public_forum_group_can_join_using_existing_owner(self):
+        from pyrogram import raw, types as telegram_types
+
+        # pyrofork represents a group with topics as FORUM, not SUPERGROUP.
+        self.chat = telegram_types.Chat._parse_channel_chat(self.client, raw.types.Channel(
+            id=1234, title="Forum group", photo=raw.types.ChatPhotoEmpty(),
+            date=0, megagroup=True, forum=True, username="gilforum", usernames=[],
+            restriction_reason=[],
+        ))
+        self.assertEqual(ChatType.FORUM, self.chat.type)
+        self.client.get_chat.return_value = self.chat
+        self.client.get_chat_member.side_effect = [UserNotParticipant(), self.member]
+        result = await self.service.join_selected_chat(3, "gilforum")
+        self.assertTrue(result["selected"])
+        self.assertTrue(result["persisted"])
+        self.assertIn(self.chat.id, self.live_filter)
+        self.client.join_chat.assert_awaited_once_with(self.chat.id)
+        self.client.stop.assert_not_awaited()
+
     async def test_cancellation_keeps_realtime_client_and_selections(self):
         started = asyncio.Event()
 
