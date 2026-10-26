@@ -105,17 +105,19 @@ def _sqlite_snapshot_bytes(path: str) -> bytes:
 
 # ── backup ───────────────────────────────────────────────────────────────
 
-def backup_accounts() -> None:
+def backup_accounts() -> bool:
     if not os.path.exists(ACCOUNTS_FILE):
-        return
+        return False
     try:
         with open(ACCOUNTS_FILE, "r", encoding="utf-8") as f:
             data = f.read()
     except Exception as e:  # noqa: BLE001
         _log(f"read {ACCOUNTS_FILE} failed: {e}")
-        return
+        return False
     if _upsert("accounts.json", data):
         _log("accounts.json backed up")
+        return True
+    return False
 
 
 def backup_session(phone: str) -> None:

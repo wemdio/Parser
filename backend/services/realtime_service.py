@@ -1,13 +1,15 @@
 from pyrogram import Client, filters
-from pyrogram.errors import FloodWait, AuthKeyUnregistered
+from pyrogram.errors import FloodWait, AuthKeyUnregistered, UserNotParticipant, UserAlreadyParticipant, InviteRequestSent
+from pyrogram.enums import ChatType, ChatMemberStatus
 from pyrogram.handlers import MessageHandler
 from backend.database.account_storage import AccountStorage
 from backend.database.supabase_client import SupabaseClient
-from backend.services.session_clients import session_clients
+from backend.services.session_clients import session_clients, SessionBusyError
 from datetime import datetime, timezone
 import asyncio
 import os
 import sys
+import time
 
 
 def _timeout_from_env(name: str, default: float) -> float:
@@ -45,6 +47,10 @@ class RealtimeService:
         self._save_queue: list[dict] = []
         self._flush_task: asyncio.Task | None = None
         self._lifecycle_lock = asyncio.Lock()
+        self._chat_filters = {}
+        self._chat_message_counts = {}
+        self._pending_joins = set()
+        self._next_join_at = 0.0
 
     # ── public status ────────────────────────────────────────────────
 
@@ -121,6 +127,7 @@ class RealtimeService:
             )
 
             self._clients.clear()
+            self._chat_filters.clear()
             self._started_at = None
             print(">>> REALTIME SERVICE STOPPED", flush=True)
 
@@ -201,7 +208,8 @@ class RealtimeService:
             print(f">>> No selected chats for {phone}, skipping realtime", flush=True)
             return
 
-        chat_filter = filters.chat(selected_chats) & (filters.text | filters.caption)
+        selected_filter = filters.chat(selected_chats)
+        chat_filter = selected_filter & (filters.text | filters.caption)
 
         async def on_message(c: Client, message):
             await self._handle_message(c, message, phone)
@@ -215,6 +223,7 @@ class RealtimeService:
         client = await session_clients.start(session_path, create_client)
 
         self._clients[phone] = client
+        self._chat_filters[phone] = selected_filter
 
         chat_count = len(selected_chats)
         print(f">>> Client {phone} connected, listening to {chat_count} chats", flush=True)
@@ -222,6 +231,93 @@ class RealtimeService:
     def _session_path(self, phone):
         safe_phone = phone.replace("+", "").replace("-", "").replace(" ", "")
         return os.path.join(self.sessions_dir, safe_phone)
+
+    def onboarding_status(self):
+        return {
+            "running": self._running,
+            "retry_after": max(0, int(self._next_join_at - time.monotonic()) + 1),
+            "accounts": [
+                {
+                    "account_id": account["id"],
+                    "connected": bool(getattr(self._clients.get(account["phone_number"]), "is_connected", False)),
+                    "listening_chat_ids": sorted(self._chat_filters.get(account["phone_number"], [])),
+                }
+                for account in self.account_storage.get_all_connected_accounts()
+            ],
+            "received_by_chat": dict(self._chat_message_counts),
+        }
+
+    async def join_selected_chat(self, account_id: int, username: str):
+        # Match lifecycle lock order. No second Telegram client is ever created.
+        async with self._lifecycle_lock:
+            remaining = self._next_join_at - time.monotonic()
+            if remaining > 0:
+                raise FloodWait(int(remaining) + 1)
+            account = self.account_storage.get_account(account_id)
+            if not account or not account.get("is_connected"):
+                raise ValueError("Account not connected")
+            phone = account["phone_number"]
+            owner = self._clients.get(phone)
+            if not self._running or owner is None or phone not in self._chat_filters:
+                raise SessionBusyError("Realtime owner required")
+
+            async def no_new_client():
+                raise SessionBusyError("Realtime owner required")
+
+            async with session_clients.read(self._session_path(phone), no_new_client) as client:
+                if client is not owner:
+                    raise SessionBusyError("Realtime owner changed")
+                self._next_join_at = time.monotonic() + 10
+                try:
+                    chat = await client.get_chat(username)
+                    if chat.type not in (ChatType.GROUP, ChatType.SUPERGROUP) or not chat.username:
+                        raise ValueError("Public group required")
+                    existing_owner = self.account_storage.selected_chat_owner(chat.id)
+                    if existing_owner is not None and existing_owner != account_id:
+                        return {"status": "selected_on_other_account", "account_id": existing_owner, "chat_id": chat.id}
+
+                    async def is_member():
+                        try:
+                            member = await client.get_chat_member(chat.id, "me")
+                        except UserNotParticipant:
+                            return False
+                        if member.status == ChatMemberStatus.BANNED:
+                            raise PermissionError("Account is banned from this group")
+                        return member.status in (ChatMemberStatus.OWNER, ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.MEMBER) or (
+                            member.status == ChatMemberStatus.RESTRICTED and member.is_member is True
+                        )
+
+                    member_before = await is_member()
+                    pending_key = (account_id, chat.id)
+                    if not member_before:
+                        if pending_key in self._pending_joins:
+                            return {"status": "pending_approval", "account_id": account_id, "chat_id": chat.id, "selected": False}
+                        try:
+                            await client.join_chat(chat.id)
+                        except UserAlreadyParticipant:
+                            pass
+                        except InviteRequestSent:
+                            self._pending_joins.add(pending_key)
+                            return {"status": "pending_approval", "account_id": account_id, "chat_id": chat.id, "selected": False}
+                        if not await is_member():
+                            raise PermissionError("Membership not confirmed")
+                    self._pending_joins.discard(pending_key)
+                    saved = self.account_storage.append_selected_chat(account_id, chat.id)
+                    self._chat_filters[phone].add(chat.id)
+                    return {
+                        "status": "already_member" if member_before else "joined",
+                        "account_id": account_id,
+                        "chat_id": chat.id,
+                        "title": chat.title,
+                        "username": chat.username,
+                        "selected": True,
+                        "listening": True,
+                        "added": saved["added"],
+                        "persisted": saved["persisted"],
+                    }
+                except FloodWait as exc:
+                    self._next_join_at = time.monotonic() + max(10, exc.value)
+                    raise
 
     # ── message handler ──────────────────────────────────────────────
 
@@ -267,6 +363,7 @@ class RealtimeService:
 
             self._save_queue.append(msg_data)
             self._msg_count += 1
+            self._chat_message_counts[chat_id] = self._chat_message_counts.get(chat_id, 0) + 1
 
         except Exception as e:
             err = f"handle_message error: {e}"

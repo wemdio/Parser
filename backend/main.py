@@ -28,7 +28,7 @@ print(f">>> SUPABASE_KEY set: {bool(os.getenv('SUPABASE_KEY'))}", flush=True)
 if os.getenv('SUPABASE_URL'):
     print(f">>> SUPABASE_URL: {os.getenv('SUPABASE_URL')[:50]}...", flush=True)
 
-from backend.routers import accounts, chats, parser, stats
+from backend.routers import accounts, chats, parser, stats, chat_onboarding
 from backend.services.parser_service import ParserService
 from backend.services.realtime_service import RealtimeService
 from backend.database.supabase_client import SupabaseClient
@@ -124,6 +124,7 @@ app.include_router(accounts.router, prefix="/api/accounts", tags=["accounts"])
 app.include_router(chats.router, prefix="/api/chats", tags=["chats"])
 app.include_router(parser.router, prefix="/api/parser", tags=["parser"])
 app.include_router(stats.router, prefix="/api/stats", tags=["stats"])
+app.include_router(chat_onboarding.router, prefix="/api/chat-onboarding", tags=["chat-onboarding"])
 
 @app.get("/health")
 async def health():

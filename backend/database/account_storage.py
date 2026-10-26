@@ -1,5 +1,6 @@
 import json
 import os
+import tempfile
 from typing import List, Dict, Optional
 from datetime import datetime
 
@@ -100,6 +101,45 @@ class AccountStorage:
         """Получает выбранные чаты для аккаунта"""
         data = self._read_data()
         return data.get("selected_chats", {}).get(str(account_id), [])
+
+    def selected_chat_owner(self, chat_id: int) -> Optional[int]:
+        # Unlike legacy reads, onboarding must fail closed on damaged storage.
+        with open(self.storage_file, encoding="utf-8") as f:
+            data = json.load(f)
+        for account_id, ids in data.get("selected_chats", {}).items():
+            if chat_id in ids:
+                return int(account_id)
+        return None
+
+    def append_selected_chat(self, account_id: int, chat_id: int) -> dict:
+        with open(self.storage_file, encoding="utf-8") as f:
+            data = json.load(f)
+        if not any(a.get("id") == account_id for a in data["accounts"]):
+            raise ValueError("Account not found")
+        selections = data.setdefault("selected_chats", {})
+        for owner, ids in selections.items():
+            if chat_id in ids and int(owner) != account_id:
+                raise ValueError("Chat already selected on another account")
+        selected = selections.setdefault(str(account_id), [])
+        added = chat_id not in selected
+        if added:
+            selected.append(chat_id)
+            fd, path = tempfile.mkstemp(dir=os.path.dirname(os.path.abspath(self.storage_file)))
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+                    f.flush()
+                    os.fsync(f.fileno())
+                os.replace(path, self.storage_file)
+            finally:
+                if os.path.exists(path):
+                    os.unlink(path)
+        try:
+            from backend.database.state_persistence import backup_accounts
+            persisted = backup_accounts() is True
+        except Exception:
+            persisted = False
+        return {"chat_ids": list(selected), "added": added, "persisted": persisted}
     
     def delete_account(self, account_id: int) -> bool:
         """Удаляет аккаунт"""
