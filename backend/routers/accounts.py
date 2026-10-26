@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from backend.services.telegram_service import TelegramService
 from backend.database.account_storage import AccountStorage
 from backend.database import state_persistence
+from backend.services.session_clients import session_clients, SessionBusyError
 import os
 import shutil
 
@@ -84,17 +85,6 @@ async def add_account(account_data: AccountCreateRequest):
         if existing_account:
             # Если аккаунт существует и не подключен, пытаемся запросить новый код
             if not existing_account.get("is_connected", False):
-                # ВАЖНО: Удаляем старую невалидную сессию перед запросом нового кода
-                from backend.services.telegram_service import TelegramService
-                temp_service = TelegramService()
-                session_path = temp_service.get_session_path(phone)
-                for path in [session_path, session_path + ".session", f"{session_path}.session"]:
-                    if os.path.exists(path):
-                        try:
-                            os.remove(path)
-                            print(f"Removed old session for existing account: {path}")
-                        except Exception as e:
-                            print(f"Could not remove session {path}: {e}")
                 
                 # Попытаемся запросить новый код для существующего аккаунта
                 try:
@@ -135,19 +125,6 @@ async def add_account(account_data: AccountCreateRequest):
                 }
             }
         
-        # Удаляем старую сессию перед добавлением нового аккаунта
-        from backend.services.telegram_service import TelegramService
-        temp_service = TelegramService()
-        session_path = temp_service.get_session_path(phone)
-        session_file = session_path + ".session"
-        
-        for path in [session_path, session_file, session_path + ".session"]:
-            if os.path.exists(path):
-                try:
-                    os.remove(path)
-                    print(f"Removed old session file: {path}")
-                except Exception as e:
-                    print(f"Could not remove session file {path}: {e}")
         
         account_id = account_storage.add_account({
             "api_id": api_id_str,
@@ -252,6 +229,17 @@ async def upload_session(
     phone_number: str = Form(...),
     name: str = Form(None)
 ):
+    phone = (phone_number or "").strip().replace(" ", "").replace("-", "").replace("(", "").replace(")", "")
+    if phone.startswith("8") and len(phone) == 11:
+        phone = "+7" + phone[1:]
+    try:
+        async with session_clients.authorize(telegram_service.get_session_path(phone)):
+            return await _upload_session(session_file, api_id, api_hash, phone, name)
+    except SessionBusyError as exc:
+        raise HTTPException(status_code=409, detail=str(exc))
+
+
+async def _upload_session(session_file, api_id, api_hash, phone_number, name):
     """
     Загружает готовый файл сессии и добавляет аккаунт.
     Используется когда нельзя получить код подтверждения на сервере.
@@ -349,19 +337,15 @@ async def upload_session(
             api_hash=api_hash_str
             # НЕ передаём phone_number - Pyrogram не будет пытаться авторизоваться
         )
+        session_clients.state(f"sessions/{phone_clean}").auth_client = test_client
         
         try:
             print("Testing session validity...", file=sys.stderr, flush=True)
             await test_client.connect()
             
             # Пробуем получить информацию о пользователе
-            try:
-                me = await test_client.get_me()
-            except Exception as me_error:
-                await test_client.disconnect()
-                raise me_error
-                
-            await test_client.disconnect()
+            me = await test_client.get_me()
+            await session_clients.close_authorization(f"sessions/{phone_clean}", test_client)
             
             print(f"Session valid! User: {me.first_name} (@{me.username})", file=sys.stderr, flush=True)
             
@@ -408,10 +392,8 @@ async def upload_session(
             
         except Exception as e:
             # Сессия невалидна - удаляем файл
-            try:
-                await test_client.disconnect()
-            except:
-                pass
+            if session_clients.state(f"sessions/{phone_clean}").auth_client is test_client:
+                await session_clients.close_authorization(f"sessions/{phone_clean}", test_client)
                 
             if os.path.exists(session_path):
                 os.remove(session_path)
@@ -457,6 +439,9 @@ async def delete_account(account_id: int):
             from backend.services.telegram_service import TelegramService
             telegram_service = TelegramService()
             session_path = telegram_service.get_session_path(phone_number)
+            state = session_clients.state(session_path)
+            if state.lock.locked() or state.client or state.auth_client or state.unavailable:
+                raise HTTPException(status_code=409, detail="Stop the active session before deleting the account")
             import os
             if os.path.exists(session_path):
                 try:
@@ -495,40 +480,23 @@ async def check_account_status(account_id: int):
             return {"is_connected": False, "status": "no_session"}
         
         # Пробуем подключиться с существующей сессией (без запроса кода!)
-        from pyrogram import Client
-        import asyncio
-        
-        client = None
         try:
-            client = Client(
+            async with session_clients.read(
                 f"sessions/{phone_clean}",
-                api_id=int(account["api_id"]),
-                api_hash=account["api_hash"]
-            )
-            
-            await client.start()
-            me = await client.get_me()
-            await client.stop()
-            
-            # Даём время на освобождение файла
-            await asyncio.sleep(0.5)
+                lambda: telegram_service.create_client(account["api_id"], account["api_hash"], phone, True),
+            ) as client:
+                me = await client.get_me()
             
             print(f"check-status: Session valid for {phone} - {me.first_name}", file=sys.stderr, flush=True)
             account_storage.update_account_connection(account_id, True)
-            # Session re-validated and stopped — capture any refresh to Supabase.
-            state_persistence.backup_session(phone)
             return {"is_connected": True, "status": "connected", "user": me.first_name}
             
+        except SessionBusyError as e:
+            raise HTTPException(status_code=409, detail=str(e))
         except Exception as e:
             error_msg = str(e)
             print(f"check-status: Session invalid for {phone}: {error_msg}", file=sys.stderr, flush=True)
             
-            # Закрываем клиент если открыт
-            if client:
-                try:
-                    await client.stop()
-                except:
-                    pass
             
             # НЕ удаляем сессию и НЕ запрашиваем код - просто сообщаем статус
             account_storage.update_account_connection(account_id, False)

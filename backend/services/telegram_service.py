@@ -4,6 +4,7 @@ import asyncio
 import os
 from typing import Optional, Dict, List
 import json
+from backend.services.session_clients import session_clients
 
 # Hard cap per single chat. pyrofork's internal FloodWait handler silently sleeps
 # 20+ seconds per channels.GetMessages, so without an outer cancel one stuck
@@ -53,12 +54,20 @@ class TelegramService:
                     phone_number=phone_number,
                     sleep_threshold=5
                 )
+                session_clients.state(session_path).auth_client = client
             return client
         except Exception as e:
             print(f"Error creating client: {e}")
             return None
     
     async def connect_account(self, api_id: str, api_hash: str, phone_number: str) -> Dict:
+        async with session_clients.authorize(self.get_session_path(phone_number), allow_pending=True) as state:
+            if state.auth_client is not None:
+                await session_clients.close_authorization(self.get_session_path(phone_number), state.auth_client)
+                self._active_clients.pop(phone_number, None)
+            return await self._connect_account(api_id, api_hash, phone_number)
+
+    async def _connect_account(self, api_id: str, api_hash: str, phone_number: str) -> Dict:
         """Подключает аккаунт и запрашивает код подтверждения"""
         client = None
         session_path = self.get_session_path(phone_number)
@@ -97,10 +106,7 @@ class TelegramService:
                 # Если AUTH_KEY_UNREGISTERED - нужно пересоздать клиента
                 if "AUTH_KEY_UNREGISTERED" in error_str or "not registered" in error_str.lower():
                     print("AUTH_KEY_UNREGISTERED detected, recreating session...")
-                    try:
-                        await client.disconnect()
-                    except:
-                        pass
+                    await session_clients.close_authorization(session_path, client)
                     
                     # Удаляем сессию ещё раз
                     for path in [session_path, f"{session_path}.session"]:
@@ -193,7 +199,20 @@ class TelegramService:
             else:
                 raise Exception(f"Connection error: {error_str}")
     
-    async def verify_code(
+    async def verify_code(self, api_id, api_hash, phone_number, phone_code,
+                          phone_code_hash, password=None):
+        try:
+            async with session_clients.authorize(self.get_session_path(phone_number), allow_pending=True) as state:
+                if state.auth_client is not None:
+                    self._active_clients[phone_number] = state.auth_client
+                return await self._verify_code(api_id, api_hash, phone_number,
+                                               phone_code, phone_code_hash, password)
+        finally:
+            client = self._active_clients.get(phone_number)
+            if client is not None and not client.is_connected:
+                self._active_clients.pop(phone_number, None)
+
+    async def _verify_code(
         self, 
         api_id: str, 
         api_hash: str, 
@@ -357,120 +376,12 @@ class TelegramService:
         return chats
 
     async def get_chats(self, api_id: str, api_hash: str, phone_number: str) -> List[Dict]:
-        """Получает список чатов для аккаунта"""
-        import sys
-        import sqlite3
-        
-        print(f"\n{'='*50}", file=sys.stderr, flush=True)
-        print(f"GET_CHATS for {phone_number}", file=sys.stderr, flush=True)
-        print(f"{'='*50}", file=sys.stderr, flush=True)
-        
-        # ВАЖНО: Закрываем старый клиент если он застрял в памяти
-        if phone_number in self._active_clients:
-            try:
-                old_client = self._active_clients[phone_number]
-                print(f"Found stale client in memory, closing...", file=sys.stderr, flush=True)
-                if old_client.is_connected:
-                    await old_client.disconnect()
-                del self._active_clients[phone_number]
-                await asyncio.sleep(2)  # Даём время освободить файл
-                print(f"Stale client closed", file=sys.stderr, flush=True)
-            except Exception as e:
-                print(f"Error closing stale client: {e}", file=sys.stderr, flush=True)
-        
-        # Retry logic для "database is locked" ошибки
-        max_retries = 5
-        retry_delay = 3  # секунды
-        
-        # Попробуем включить WAL mode для сессии
-        session_path = self.get_session_path(phone_number)
-        session_file = f"{session_path}.session"
-        print(f"Session file: {session_file}", file=sys.stderr, flush=True)
-        print(f"Session exists: {os.path.exists(session_file)}", file=sys.stderr, flush=True)
-        
-        if os.path.exists(session_file):
-            try:
-                conn = sqlite3.connect(session_file, timeout=30)
-                conn.execute("PRAGMA journal_mode=WAL")
-                conn.close()
-                print(f"WAL mode enabled", file=sys.stderr, flush=True)
-            except Exception as wal_err:
-                print(f"Could not set WAL mode: {wal_err}", file=sys.stderr, flush=True)
-        
-        for attempt in range(max_retries):
-            client = None
-            try:
-                # Небольшая задержка перед попыткой (даёт время освободить файл)
-                if attempt > 0:
-                    await asyncio.sleep(1)
-                
-                print(f"Attempt {attempt + 1}/{max_retries}", file=sys.stderr, flush=True)
-                
-                # Используем существующую сессию без попытки переавторизации
-                client = await self.create_client(api_id, api_hash, phone_number, use_existing_session=True)
-                
-                if not client:
-                    raise Exception("Failed to create client")
-                
-                print(f"Client created, connecting...", file=sys.stderr, flush=True)
-                await client.connect()
-                
-                if not client.is_connected:
-                    raise Exception("Not connected")
-                
-                print(f"Connected! Getting dialogs via raw API...", file=sys.stderr, flush=True)
-                
-                chats = await self._get_chats_raw(client)
-                
-                print(f"Found {len(chats)} chats", file=sys.stderr, flush=True)
-                
-                await client.disconnect()
-                
-                # Даём время на освобождение файла
-                await asyncio.sleep(0.5)
-                
-                print(f"SUCCESS! Returning {len(chats)} chats", file=sys.stderr, flush=True)
-                return chats
-                
-            except FloodWait as fw:
-                # FloodWait - Telegram просит подождать
-                wait_time = fw.value
-                print(f"FloodWait: Telegram asks to wait {wait_time} seconds", file=sys.stderr, flush=True)
-                
-                if client:
-                    try:
-                        await client.disconnect()
-                    except:
-                        pass
-                
-                if attempt < max_retries - 1:
-                    print(f"Waiting {wait_time}s before retry...", file=sys.stderr, flush=True)
-                    await asyncio.sleep(wait_time)
-                    continue
-                else:
-                    raise Exception(f"FloodWait: Please wait {wait_time} seconds and try again")
-                
-            except Exception as e:
-                error_msg = str(e)
-                print(f"Error: {error_msg}", file=sys.stderr, flush=True)
-                
-                # Закрываем клиент если открыт
-                if client:
-                    try:
-                        if client.is_connected:
-                            await client.disconnect()
-                        await asyncio.sleep(0.5)
-                    except:
-                        pass
-                
-                # Если "database is locked" - пробуем снова
-                if "database is locked" in error_msg.lower() and attempt < max_retries - 1:
-                    wait_time = retry_delay * (attempt + 1)
-                    print(f"Database locked, retry {attempt + 1}/{max_retries} in {wait_time}s...", file=sys.stderr, flush=True)
-                    await asyncio.sleep(wait_time)
-                    continue
-                
-                raise Exception(f"Error getting chats: {error_msg}")
+        async with session_clients.read(
+            self.get_session_path(phone_number),
+            lambda: self.create_client(api_id, api_hash, phone_number, True),
+        ) as client:
+            return await self._get_chats_raw(client)
+
     
     async def parse_messages(
         self, 
@@ -480,6 +391,13 @@ class TelegramService:
         chat_ids: List[int],
         hours_back: int = 1
     ) -> Dict:
+        async with session_clients.read(
+            self.get_session_path(phone_number),
+            lambda: self.create_client(api_id, api_hash, phone_number, True),
+        ) as client:
+            return await self._parse_with_client(client, chat_ids, hours_back)
+
+    async def _parse_with_client(self, client, chat_ids, hours_back):
         """Парсит сообщения за последние N часов из указанных чатов
         
         Returns:
@@ -490,15 +408,7 @@ class TelegramService:
         from datetime import datetime, timedelta, timezone
         import time
         
-        # Используем существующую сессию без попытки переавторизации
-        client = await self.create_client(api_id, api_hash, phone_number, use_existing_session=True)
-        
-        if not client:
-            raise Exception("Failed to create client")
-        
         try:
-            await client.connect()
-            
             if not client.is_connected:
                 raise Exception("Not connected")
             
@@ -922,8 +832,6 @@ class TelegramService:
                     parsing_stats.append(chat_stat)
                     continue
             
-            await client.disconnect()
-            
             # 📊 Возвращаем сообщения и статистику
             return {
                 "messages": messages_data,
@@ -931,10 +839,5 @@ class TelegramService:
             }
             
         except Exception as e:
-            if client and client.is_connected:
-                try:
-                    await client.disconnect()
-                except:
-                    pass
             raise Exception(f"Error parsing messages: {str(e)}")
 

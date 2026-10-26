@@ -45,6 +45,8 @@ if __name__ == "__main__":
         "backend.main:app",
         host="0.0.0.0",
         port=8000,
+        # Session ownership is process-local; WEB_CONCURRENCY must not fork it.
+        workers=1,
         reload=False,  # Отключаем auto-reload - он не работает корректно
         log_level="info",
         access_log=True

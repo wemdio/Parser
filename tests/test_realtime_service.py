@@ -2,7 +2,7 @@ import asyncio
 import sys
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, Mock, patch
 
 
 # Keep this lifecycle test independent from the external Supabase SDK.
@@ -11,6 +11,7 @@ supabase_client_module.SupabaseClient = object
 sys.modules.setdefault("backend.database.supabase_client", supabase_client_module)
 
 from backend.services import realtime_service as realtime_module
+from backend.services.session_clients import SessionClients
 
 
 def account(account_id: int, phone: str) -> dict:
@@ -39,10 +40,43 @@ class FakeClient:
 
 
 class RealtimeServiceStartTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        registry = patch.object(realtime_module, "session_clients", SessionClients())
+        registry.start()
+        self.addCleanup(registry.stop)
+
     async def asyncTearDown(self):
         service = getattr(self, "service", None)
         if service and service.is_running():
             await service.stop()
+
+    async def test_started_realtime_owner_is_reused_by_telegram_consumer(self):
+        from backend.services import telegram_service as telegram_module
+
+        current = account(1, "+70000000001")
+        client = Mock(is_connected=True)
+        client.start = AsyncMock()
+        client.stop = AsyncMock()
+        self.service = realtime_module.RealtimeService(object())
+        self.service.account_storage = Mock()
+        self.service.account_storage.get_selected_chats.return_value = [123]
+        with (
+            patch.object(realtime_module.os.path, "exists", return_value=True),
+            patch.object(realtime_module, "Client", return_value=client) as factory,
+            patch.object(telegram_module, "session_clients", realtime_module.session_clients),
+        ):
+            await self.service._start_client(current)
+            consumer = telegram_module.TelegramService()
+            consumer.create_client = AsyncMock(side_effect=AssertionError("second connection"))
+            consumer._get_chats_raw = AsyncMock(return_value=[])
+            await consumer.get_chats("1", "test", current["phone_number"])
+            consumer._get_chats_raw.assert_awaited_once_with(client)
+            consumer.create_client.assert_not_awaited()
+            factory.assert_called_once()
+            client.add_handler.assert_called_once()
+            client.stop.assert_not_awaited()
+            await self.service._stop_client_with_timeout(current["phone_number"], client)
+            client.stop.assert_awaited_once()
 
     async def test_hung_client_does_not_block_other_accounts(self):
         hung = account(1, "+70000000001")

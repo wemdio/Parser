@@ -3,6 +3,7 @@ from pyrogram.errors import FloodWait, AuthKeyUnregistered
 from pyrogram.handlers import MessageHandler
 from backend.database.account_storage import AccountStorage
 from backend.database.supabase_client import SupabaseClient
+from backend.services.session_clients import session_clients
 from datetime import datetime, timezone
 import asyncio
 import os
@@ -152,7 +153,7 @@ class RealtimeService:
     async def _stop_client_with_timeout(self, phone: str, client: Client):
         try:
             await asyncio.wait_for(
-                client.stop(),
+                session_clients.stop(self._session_path(phone), client),
                 timeout=CLIENT_STOP_TIMEOUT_SECONDS,
             )
             print(f">>> Disconnected {phone}", flush=True)
@@ -190,8 +191,7 @@ class RealtimeService:
         api_hash = account["api_hash"]
         account_id = account["id"]
 
-        safe_phone = phone.replace("+", "").replace("-", "").replace(" ", "")
-        session_path = os.path.join(self.sessions_dir, safe_phone)
+        session_path = self._session_path(phone)
 
         if not os.path.exists(f"{session_path}.session"):
             raise FileNotFoundError(f"Session file not found: {session_path}.session")
@@ -201,35 +201,27 @@ class RealtimeService:
             print(f">>> No selected chats for {phone}, skipping realtime", flush=True)
             return
 
-        client = Client(
-            session_path,
-            api_id=api_id,
-            api_hash=api_hash,
-        )
-
         chat_filter = filters.chat(selected_chats) & (filters.text | filters.caption)
 
         async def on_message(c: Client, message):
             await self._handle_message(c, message, phone)
 
-        client.add_handler(MessageHandler(on_message, chat_filter))
+        def create_client():
+            client = Client(session_path, api_id=api_id, api_hash=api_hash,
+                            sleep_threshold=5)
+            client.add_handler(MessageHandler(on_message, chat_filter))
+            return client
 
-        try:
-            await client.start()
-        except BaseException:
-            try:
-                await asyncio.wait_for(
-                    client.stop(),
-                    timeout=CLIENT_STOP_TIMEOUT_SECONDS,
-                )
-            except BaseException:
-                pass
-            raise
+        client = await session_clients.start(session_path, create_client)
 
         self._clients[phone] = client
 
         chat_count = len(selected_chats)
         print(f">>> Client {phone} connected, listening to {chat_count} chats", flush=True)
+
+    def _session_path(self, phone):
+        safe_phone = phone.replace("+", "").replace("-", "").replace(" ", "")
+        return os.path.join(self.sessions_dir, safe_phone)
 
     # ── message handler ──────────────────────────────────────────────
 
